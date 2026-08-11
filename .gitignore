@@ -20,7 +20,7 @@
 *.log
 npm-debug.log*
 *.tsbuildinfo
-.claude/
+.claude/settings.local.json
 
 # editors
 .idea/
