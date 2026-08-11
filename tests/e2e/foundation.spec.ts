@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { avaloriaIdeas, childCategories } from "@/content/avaloria-content";
 
 const heroHeading = "Deine Ideen machen Avaloria größer.";
-const openQuestionHeading = "Welche Farbe soll der Fluss haben?";
+const openQuestionHeading = "Welches Tier soll dich in Avaloria begleiten?";
 
 function heroRegion(page: Page) {
   return page.getByRole("region", { name: heroHeading });
