@@ -4,8 +4,8 @@ import type {
   DeliveryFailureReason,
   DeliveryOutcome,
 } from "@/application/submissions/deliver-submission";
-import { childUnsafeVocabulary } from "@/content/content-source";
 import { createTextSubmission, type TextSubmission } from "@/domain/submissions/submission";
+import { expectChildSafe } from "../support/child-safe";
 
 const submission: TextSubmission = createTextSubmission(
   { questionId: "companion-animal", originalText: "Mein Tier ist ein Steinwolf." },
@@ -60,21 +60,11 @@ describe("childMessageFor", () => {
   });
 
   it("uses no child-unsafe vocabulary in any message", () => {
-    const messages = [
-      childMessageFor({ delivered: true, submission }),
-      ...failureReasons.map((reason) => childMessageFor(failure(reason))),
-      childMessageFor(failure(undefined)),
-    ];
-
-    for (const message of messages) {
-      for (const word of childUnsafeVocabulary) {
-        // Word boundaries, not substrings: German "Papier" contains "api" and would
-        // otherwise fail a perfectly good sentence. Case-insensitive, because these
-        // are authored German sentences where "server" is as unfit as "Server".
-        const mention = new RegExp(`\\b${word}\\b`, "iu");
-        expect(message, `a child message must not mention ${word}`).not.toMatch(mention);
-      }
+    expectChildSafe(childMessageFor({ delivered: true, submission }), "the arrived message");
+    for (const reason of failureReasons) {
+      expectChildSafe(childMessageFor(failure(reason)), `the ${reason} message`);
     }
+    expectChildSafe(childMessageFor(failure(undefined)), "the unnamed-failure message");
   });
 
   it("names no error codes or technical failure detail", () => {
@@ -82,7 +72,9 @@ describe("childMessageFor", () => {
 
     for (const message of messages) {
       expect(message, "a child message must carry no numeric code").not.toMatch(/\d/u);
-      for (const word of ["HTTP", "fetch", "Timeout", "Stack", "Fehlercode", "Verbindung"]) {
+      for (const word of ["Fehlercode", "Verbindung"]) {
+        // Not in the shared list: these are plain German a child could meet elsewhere,
+        // but in a failure sentence they name the machinery instead of the answer.
         expect(message, `a child message must not mention ${word}`).not.toMatch(
           new RegExp(`\\b${word}\\b`, "iu"),
         );

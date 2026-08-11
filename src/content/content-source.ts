@@ -157,4 +157,4 @@ export const childUnsafeVocabulary = [
   "Backend",
   "Supabase",
   "Sprint",
-] as const satisfies ReadonlyArray<string>;
+] as const;

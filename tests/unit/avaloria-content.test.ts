@@ -7,8 +7,8 @@ import {
   childStatusLegend,
   childStatusPresentationFor,
   childTopicLabelFor,
-  childUnsafeVocabulary,
 } from "@/content/content-source";
+import { expectChildSafe } from "../support/child-safe";
 
 /** Sprint-1 placeholders that MCL-42 removes. */
 const removedDemoIds = [
@@ -20,6 +20,13 @@ const removedDemoIds = [
   "question-colors",
 ];
 
+/**
+ * Four of the six ids above, not all six, and that asymmetry is deliberate.
+ * "Eine Karte für alle" is legitimately reused by the re-sourced persistent-shared-map
+ * entry, so banning the title would ban valid content; only the demo *id* is gone.
+ * The river-colour demo question is a question, not an idea, and is pinned in
+ * tests/unit/open-questions.test.ts instead. Do not "fix" this list to six.
+ */
 const removedDemoTitles = [
   "Das Tor ins grüne Tal",
   "Die Lichter von Avaloria",
@@ -159,12 +166,6 @@ describe("internal owner taxonomy", () => {
 });
 
 describe("child-safe vocabulary", () => {
-  function expectChildSafe(visible: string, context: string): void {
-    for (const word of childUnsafeVocabulary) {
-      expect(visible, `${context} must not expose ${word}`).not.toContain(word);
-    }
-  }
-
   it("keeps idea titles and summaries free of project jargon", () => {
     for (const idea of avaloriaIdeas) {
       expectChildSafe(`${idea.title} ${idea.summary}`, idea.id);
@@ -180,6 +181,12 @@ describe("child-safe vocabulary", () => {
   it("keeps every status label and explanation free of project jargon", () => {
     for (const status of childStatusLegend) {
       expectChildSafe(`${status.label} ${status.explanation}`, `status ${status.id}`);
+    }
+  });
+
+  it("keeps every filter chip label and description free of project jargon", () => {
+    for (const category of childCategories) {
+      expectChildSafe(`${category.label} ${category.description}`, `category ${category.label}`);
     }
   });
 });

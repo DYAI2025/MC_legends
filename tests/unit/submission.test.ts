@@ -5,6 +5,7 @@ import {
   hasArrivedInProject,
   submissionStatusLabel,
 } from "@/domain/submissions/submission";
+import { expectChildSafe } from "../support/child-safe";
 
 const dependencies = {
   createId: () => "sub-001",
@@ -126,4 +127,19 @@ describe("hasArrivedInProject", () => {
     expect(hasArrivedInProject("SERVER_ACKNOWLEDGED")).toBe(true);
     expect(submissionStatusLabel("SERVER_ACKNOWLEDGED")).toBe("Im Projekt angekommen");
   });
+});
+
+/**
+ * These two sentences are as child-facing as any content string, and until now the
+ * only surface of the four that no vocabulary rule covered.
+ */
+describe("submission status wording", () => {
+  it.each(["LOCAL_ONLY", "SERVER_ACKNOWLEDGED"] as const)(
+    "keeps the %s label free of project jargon",
+    (status) => {
+      const label = submissionStatusLabel(status);
+      expect(label.trim()).not.toBe("");
+      expectChildSafe(label, `status label ${status}`);
+    },
+  );
 });

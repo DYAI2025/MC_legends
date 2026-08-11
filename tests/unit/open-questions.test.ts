@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { allInternalCategories, childUnsafeVocabulary } from "@/content/content-source";
+import { allInternalCategories } from "@/content/content-source";
 import { focusQuestion, openQuestions, otherOpenQuestions } from "@/content/open-questions";
+import { expectChildSafe } from "../support/child-safe";
 
 describe("open design questions", () => {
   it("holds at least three real open questions", () => {
@@ -53,14 +54,10 @@ describe("open design questions", () => {
 
   it("asks children nothing technical or project-management shaped", () => {
     for (const question of openQuestions) {
-      const visible = `${question.title} ${question.prompt} ${question.placeholder}`;
-      for (const word of childUnsafeVocabulary) {
-        // Word boundaries, not substrings: German "Papier" contains "api" and would
-        // otherwise fail a perfectly good question. Case-insensitive, because these
-        // are authored German sentences where "server" is as unfit as "Server".
-        const mention = new RegExp(`\\b${word}\\b`, "iu");
-        expect(visible, `${question.id} must not mention ${word}`).not.toMatch(mention);
-      }
+      expectChildSafe(
+        `${question.title} ${question.prompt} ${question.placeholder}`,
+        question.id,
+      );
     }
   });
 

@@ -4,11 +4,11 @@ import { avaloriaIdeas } from "@/content/avaloria-content";
 import {
   childStatusLegend,
   childTopicLabelFor,
-  childUnsafeVocabulary,
   type InternalCategory,
 } from "@/content/content-source";
 import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
 import { createTextSubmission, submissionStatusLabel } from "@/domain/submissions/submission";
+import { expectChildSafe } from "../support/child-safe";
 
 const removedDemoStrings = [
   "Das Tor ins grüne Tal",
@@ -231,16 +231,12 @@ test("the child view stays free of technical vocabulary in the failure case", as
 
   const visibleText = await page.locator("body").innerText();
   // Guard against a locator that silently matches nothing: the failure copy has to be
-  // in the text this assertion reads, otherwise the loop below proves nothing.
+  // in the text this assertion reads, otherwise the check below proves nothing.
   expect(visibleText).toContain(onDeviceLabel);
 
-  const forbidden = [...childUnsafeVocabulary, "HTTP", "500", "503", "fetch", "Timeout", "Stack"];
-  for (const word of forbidden) {
-    // Word boundaries, not substrings: German "Papier" contains "api". Case-insensitive,
-    // because "server" is as unfit in a child view as "Server".
-    const mention = new RegExp(`\\b${word}\\b`, "iu");
-    expect(visibleText, `the child view must not expose "${word}"`).not.toMatch(mention);
-  }
+  // Same rule, same list as every unit surface - the assembled page is just one more
+  // child-facing surface, not a place with its own standard.
+  expectChildSafe(visibleText, "the child view in the failure case");
 });
 
 test("an empty or whitespace-only answer cannot be sent", async ({ page }) => {
