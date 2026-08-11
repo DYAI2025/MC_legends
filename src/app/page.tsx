@@ -7,7 +7,6 @@ import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import {
   avaloriaIdeas,
   childCategories,
-  currentQuestion,
   type ChildCategory,
 } from "@/content/avaloria-content";
 import {
@@ -16,8 +15,11 @@ import {
   childStatusPresentationFor,
   childTopicLabelFor,
 } from "@/content/content-source";
+import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
 
 const repository = createBrowserSubmissionRepository();
+const question = focusQuestion();
+const upcomingQuestions = otherOpenQuestions();
 
 export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState<ChildCategory | "Alle Ideen">("Alle Ideen");
@@ -40,7 +42,7 @@ export default function HomePage() {
     setSavedMessage(null);
     try {
       await submitText(
-        { questionId: currentQuestion.id, originalText: answer },
+        { questionId: question.id, originalText: answer },
         repository,
         { createId: () => crypto.randomUUID(), now: () => new Date() },
       );
@@ -163,26 +165,34 @@ export default function HomePage() {
           <div className="question-art" aria-hidden="true"><span>?</span></div>
           <div className="question-copy">
             <p className="section-kicker">Eine offene Frage</p>
-            <h2 id="question-heading">{currentQuestion.title}</h2>
-            <p>{currentQuestion.prompt}</p>
+            <h2 id="question-heading">{question.title}</h2>
+            <p>{question.prompt}</p>
             <form onSubmit={handleAnswerSubmit}>
               <label htmlFor="answer">Deine Antwort</label>
               <textarea
                 id="answer"
                 value={answer}
                 onChange={(event) => setAnswer(event.target.value)}
-                placeholder="Ich stelle mir den Fluss so vor ..."
+                placeholder={question.placeholder}
                 rows={4}
               />
               <div className="form-footer">
                 <button className="button button-primary" disabled={isSaving || answer.trim().length === 0} type="submit">
                   {isSaving ? "Wird gespeichert …" : "Antwort speichern"} <span aria-hidden="true">→</span>
                 </button>
-                <span className="local-note"><span aria-hidden="true">▣</span> Nur auf deinem Gerät gespeichert</span>
               </div>
               {savedMessage ? <p className="form-message" role="status">{savedMessage}</p> : null}
             </form>
           </div>
+        </div>
+
+        <div className="upcoming-questions" aria-labelledby="upcoming-heading">
+          <h3 id="upcoming-heading">Diese Fragen kommen später dran</h3>
+          <ul>
+            {upcomingQuestions.map((upcoming) => (
+              <li key={upcoming.id}>{upcoming.title}</li>
+            ))}
+          </ul>
         </div>
       </section>
 

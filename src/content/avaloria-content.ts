@@ -202,9 +202,3 @@ export const avaloriaIdeas: ReadonlyArray<AvaloriaIdea> = [
     source: jiraSource("MCL-11", "Echtzeitkalender, globale Events und Offline-Fairness"),
   },
 ];
-
-export const currentQuestion = {
-  id: "river-color",
-  title: "Welche Farbe soll der Fluss haben?",
-  prompt: "Wie sieht der Fluss in deiner Fantasie aus? Schreib uns deine Idee.",
-} as const;
