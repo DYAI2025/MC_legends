@@ -1,4 +1,5 @@
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
+import { childStatusMeta } from "@/content/avaloria-content";
 
 export default function HomePage() {
   return (
@@ -16,6 +17,26 @@ export default function HomePage() {
           <div className="concept-badge">Konzeptbild · noch nicht fest</div>
           <AvaloriaHeroArt />
           <div className="visual-caption"><span aria-hidden="true">✦</span> Das helle Tal von Avaloria</div>
+        </div>
+      </section>
+      <section className="status-section" aria-labelledby="status-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">So lesen wir Ideen</p>
+            <h2 id="status-heading">Vier Zeichen zeigen dir, wo eine Idee steht.</h2>
+          </div>
+          <p className="section-support">Jede Karte erklärt sich selbst. Die Farbe ist nur eine Hilfe.</p>
+        </div>
+        <div className="status-grid">
+          {childStatusMeta.map((status) => (
+            <article className={`status-card status-${status.id}`} key={status.id}>
+              <span className="status-icon" aria-hidden="true">{status.icon}</span>
+              <div>
+                <h3>{status.label}</h3>
+                <p>{status.explanation}</p>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
     </main>
