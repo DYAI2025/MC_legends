@@ -1,12 +1,15 @@
 version: 2
 updates:
+  # Version updates are paused during the delivery-stabilisation phase.
+  # `open-pull-requests-limit: 0` stops scheduled version-update PRs.
+  # Dependabot SECURITY updates are a separate repository setting and stay ON.
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
