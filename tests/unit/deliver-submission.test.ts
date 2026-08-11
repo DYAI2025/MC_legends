@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deliverSubmission } from "@/application/submissions/deliver-submission";
-import type { SubmissionInbox } from "@/application/submissions/submission-inbox";
+import { type SubmissionInbox, SubmissionInboxError } from "@/application/submissions/submission-inbox";
 import type { SubmissionRepository } from "@/application/submissions/submission-repository";
 import {
   createTextSubmission,
@@ -65,6 +65,7 @@ describe("deliverSubmission", () => {
     const outcome = await deliverSubmission(submission, repository, inbox);
 
     expect(outcome.delivered).toBe(true);
+    expect(outcome.reason).toBeUndefined();
     expect(outcome.submission.status).toBe("SERVER_ACKNOWLEDGED");
     expect(outcome.submission.originalText).toBe(ORIGINAL_TEXT);
 
@@ -84,13 +85,14 @@ describe("deliverSubmission", () => {
 
     const inbox: SubmissionInbox = {
       async deliver(): Promise<ServerReceipt> {
-        throw new Error("inbox did not acknowledge the submission");
+        throw new SubmissionInboxError("transport");
       },
     };
 
     const outcome = await deliverSubmission(submission, repository, inbox);
 
     expect(outcome.delivered).toBe(false);
+    expect(outcome.reason).toBe("transport");
     expect(outcome.submission).toBe(submission);
 
     const stored = await storedSubmission(repository, submission);
@@ -113,6 +115,7 @@ describe("deliverSubmission", () => {
     const outcome = await deliverSubmission(submission, repository, inbox);
 
     expect(outcome.delivered).toBe(false);
+    expect(outcome.reason).toBe("refused");
     expect(outcome.submission.status).toBe("LOCAL_ONLY");
 
     const stored = await storedSubmission(repository, submission);
@@ -166,6 +169,7 @@ describe("deliverSubmission", () => {
     // Understating what arrived is the accepted direction: never tell a child an
     // answer reached the project when this device could not record that it did.
     expect(outcome.delivered).toBe(false);
+    expect(outcome.reason).toBe("local-save");
     expect(outcome.submission).toBe(submission);
     expect(outcome.submission.status).toBe("LOCAL_ONLY");
 
@@ -185,7 +189,7 @@ describe("deliverSubmission", () => {
       async deliver(): Promise<ServerReceipt> {
         attempts += 1;
         if (attempts === 1) {
-          throw new Error("inbox did not acknowledge the submission");
+          throw new Error("some unrecognised failure");
         }
         return { receiptId: "receipt-778", receivedAt: "2026-08-11T10:05:00.000Z" };
       },
@@ -193,6 +197,8 @@ describe("deliverSubmission", () => {
 
     const first = await deliverSubmission(submission, repository, inbox);
     expect(first.delivered).toBe(false);
+    // Unrecognised failures are treated as retryable rather than permanent.
+    expect(first.reason).toBe("transport");
     expect((await storedSubmission(repository, submission)).status).toBe("LOCAL_ONLY");
 
     const second = await deliverSubmission(first.submission, repository, inbox);

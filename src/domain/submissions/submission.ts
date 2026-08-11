@@ -74,10 +74,15 @@ export function acknowledgeSubmission(
     throw new Error("receivedAt must not be blank");
   }
 
+  // Validated by trimming, so stored trimmed - padding must not survive into a
+  // receipt. The submitted text is the opposite case and is never touched.
   return Object.freeze({
     ...submission,
     status: "SERVER_ACKNOWLEDGED" as const,
-    receipt: Object.freeze({ ...receipt }),
+    receipt: Object.freeze({
+      receiptId: receipt.receiptId.trim(),
+      receivedAt: receipt.receivedAt.trim(),
+    }),
   });
 }
 

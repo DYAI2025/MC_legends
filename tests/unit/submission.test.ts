@@ -56,6 +56,20 @@ describe("acknowledgeSubmission", () => {
     });
   });
 
+  it("stores a padded receipt without its padding", () => {
+    const acknowledged = acknowledgeSubmission(submission, {
+      receiptId: "  receipt-001  ",
+      receivedAt: "  2026-08-11T10:00:00.000Z  ",
+    });
+
+    expect(acknowledged.receipt).toEqual({
+      receiptId: "receipt-001",
+      receivedAt: "2026-08-11T10:00:00.000Z",
+    });
+    // The submitted text is the opposite rule and keeps every space it arrived with.
+    expect(acknowledged.originalText).toBe(submission.originalText);
+  });
+
   it("refuses to acknowledge without a real receipt id", () => {
     expect(() =>
       acknowledgeSubmission(submission, {
