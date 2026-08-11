@@ -2,6 +2,11 @@ export type SubmissionId = string;
 
 export type SubmissionStatus = "LOCAL_ONLY" | "SERVER_ACKNOWLEDGED";
 
+export type ServerReceipt = Readonly<{
+  receiptId: string;
+  receivedAt: string;
+}>;
+
 export type TextSubmission = Readonly<{
   id: SubmissionId;
   kind: "text";
@@ -10,6 +15,8 @@ export type TextSubmission = Readonly<{
   createdAt: string;
   status: SubmissionStatus;
   profileId?: string;
+  /** Only present once the server really acknowledged this submission. */
+  receipt?: ServerReceipt;
 }>;
 
 export type CreateTextSubmissionInput = Readonly<{
@@ -48,6 +55,29 @@ export function createTextSubmission(
     createdAt: dependencies.now().toISOString(),
     status: "LOCAL_ONLY" as const,
     ...(input.profileId ? { profileId: input.profileId } : {}),
+  });
+}
+
+/**
+ * The only way to reach SERVER_ACKNOWLEDGED. A real receipt is required, so the UI
+ * cannot promote a submission to "Im Projekt angekommen" on its own.
+ */
+export function acknowledgeSubmission(
+  submission: TextSubmission,
+  receipt: ServerReceipt,
+): TextSubmission {
+  if (receipt.receiptId.trim().length === 0) {
+    throw new Error("receiptId must not be blank");
+  }
+
+  if (receipt.receivedAt.trim().length === 0) {
+    throw new Error("receivedAt must not be blank");
+  }
+
+  return Object.freeze({
+    ...submission,
+    status: "SERVER_ACKNOWLEDGED" as const,
+    receipt: Object.freeze({ ...receipt }),
   });
 }
 
