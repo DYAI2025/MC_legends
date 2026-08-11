@@ -78,8 +78,9 @@ export const openQuestions: ReadonlyArray<OpenQuestion> = [
 ];
 
 /**
- * The parameter exists so the guard below can be exercised against a failing set.
- * Production callers pass nothing and always get the checked real dataset.
+ * Both selectors take the question set as an optional parameter so their filters can
+ * be exercised against a set that breaks the invariant. Production callers pass
+ * nothing and always get the checked real dataset.
  */
 export function focusQuestion(questions: ReadonlyArray<OpenQuestion> = openQuestions): OpenQuestion {
   const focused = questions.filter((question) => question.state === "open" && question.focus);
@@ -89,6 +90,8 @@ export function focusQuestion(questions: ReadonlyArray<OpenQuestion> = openQuest
   return focused[0];
 }
 
-export function otherOpenQuestions(): ReadonlyArray<OpenQuestion> {
-  return openQuestions.filter((question) => question.state === "open" && !question.focus);
+export function otherOpenQuestions(
+  questions: ReadonlyArray<OpenQuestion> = openQuestions,
+): ReadonlyArray<OpenQuestion> {
+  return questions.filter((question) => question.state === "open" && !question.focus);
 }

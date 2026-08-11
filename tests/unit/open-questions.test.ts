@@ -64,9 +64,34 @@ describe("open design questions", () => {
     }
   });
 
-  it("carries the state field MCL-35 needs for later rotation", () => {
-    for (const question of openQuestions) {
-      expect(["open", "closed"]).toContain(question.state);
-    }
+  /**
+   * MCL-35 will close, rotate and archive questions. Asserting that every state value is
+   * one of its own two union members would prove nothing - what has to hold on today's
+   * model is the behaviour rotation depends on: a closed question leaves the rotation.
+   */
+  it("keeps a closed question out of the active rotation", () => {
+    const [focused, next] = openQuestions;
+    const withClosed = [focused, { ...next, state: "closed" as const }];
+
+    const others = otherOpenQuestions(withClosed).map((question) => question.id);
+    expect(others, `${next.id} is closed and must not be offered as upcoming`).not.toContain(next.id);
+    expect(others).toEqual([]);
+    expect(focusQuestion(withClosed).id).toBe(focused.id);
+  });
+
+  it("completes one rotation step without a data-model change", () => {
+    const [previous, next, ...rest] = openQuestions;
+    const rotated = [
+      { ...previous, state: "closed" as const, focus: false },
+      { ...next, focus: true },
+      ...rest,
+    ];
+
+    expect(focusQuestion(rotated).id).toBe(next.id);
+
+    const others = otherOpenQuestions(rotated).map((question) => question.id);
+    expect(others, "the closed question must appear in neither list").not.toContain(previous.id);
+    expect(others, "the new focus question must appear in neither list").not.toContain(next.id);
+    expect(others).toEqual(rest.map((question) => question.id));
   });
 });
