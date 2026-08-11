@@ -28,3 +28,11 @@ test("hero has two clear primary actions", async ({ page }) => {
   await expect(page.getByRole("link", { name: /Idee teilen/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Frage beantworten/ })).toBeVisible();
 });
+
+test("the open question uses simple language and a disabled empty answer", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Welche Farbe soll der Fluss haben?" })).toBeVisible();
+  await expect(page.getByLabel("Deine Antwort")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Antwort speichern" })).toBeDisabled();
+  await expect(page.locator("body")).not.toContainText("Divergenzphase");
+});
