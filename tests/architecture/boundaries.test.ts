@@ -38,4 +38,13 @@ describe("architecture boundaries", () => {
       /from ["']@\/adapters\//,
     ]);
   });
+
+  it("keeps the content datasets independent from the delivery layer", async () => {
+    await expectNoForbiddenImports("src/content", [
+      /from ["']next(?:\/|["'])/,
+      /from ["']react(?:\/|["'])/,
+      /from ["']@\/adapters\//,
+      /from ["']@\/app\//,
+    ]);
+  });
 });

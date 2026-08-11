@@ -3,9 +3,14 @@ import {
   avaloriaIdeas,
   childCategories,
   childStatusFor,
-  childStatusMeta,
-  internalCategoryLabel,
+  childStatusLegend,
+  childStatusMetaFor,
 } from "@/content/avaloria-content";
+import {
+  allInternalCategories,
+  childTopicLabelFor,
+  childUnsafeVocabulary,
+} from "@/content/content-source";
 
 /** Sprint-1 placeholders that MCL-42 removes. */
 const removedDemoIds = [
@@ -67,7 +72,7 @@ describe("avaloria content", () => {
 
     expect(prologue.length).toBeGreaterThan(0);
     expect(mainStory.length).toBeGreaterThan(0);
-    expect(internalCategoryLabel("prologue")).not.toBe(internalCategoryLabel("main-story"));
+    expect(childTopicLabelFor("prologue")).not.toBe(childTopicLabelFor("main-story"));
     for (const idea of [...prologue, ...mainStory]) {
       expect(idea.source.ref).toMatch(/^MCL-\d+$/);
     }
@@ -75,8 +80,8 @@ describe("avaloria content", () => {
 
   it("maps every entry onto one of the accepted child groups and child states", () => {
     const groups = childCategories.map((category) => category.label);
-    const states = childStatusMeta.map((status) => status.id);
-    expect(groups.length).toBeLessThanOrEqual(6);
+    const states = childStatusLegend.map((status) => status.id);
+    expect(groups.length).toBe(6);
 
     for (const idea of avaloriaIdeas) {
       expect(groups).toContain(idea.childCategory);
@@ -84,13 +89,86 @@ describe("avaloria content", () => {
     }
   });
 
-  it("uses no child-facing project jargon in visible strings", () => {
-    const forbidden = ["Canon", "SSoT", "Divergenz", "IndexedDB", "Sync", "STATED", "TENTATIVE"];
+  it("never offers a filter chip that would render an empty grid", () => {
+    for (const category of childCategories) {
+      const matching = avaloriaIdeas.filter((idea) => idea.childCategory === category.label);
+      expect(matching.length, `filter "${category.label}" must not be a dead end`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("truth status to child status mapping", () => {
+  it.each([
+    ["STATED", "in-world"],
+    ["TENTATIVE", "idea"],
+    ["AMBIGUOUS", "open"],
+    ["CONFLICT", "open"],
+    ["OPEN", "open"],
+  ] as const)("maps %s to %s", (truth, expected) => {
+    expect(childStatusFor(truth)).toBe(expected);
+  });
+
+  it("never presents a non-STATED entry as already part of the world", () => {
     for (const idea of avaloriaIdeas) {
-      const visible = `${idea.title} ${idea.summary}`;
-      for (const word of forbidden) {
-        expect(visible, `${idea.id} must not expose ${word}`).not.toContain(word);
+      if (idea.truthStatus !== "STATED") {
+        expect(childStatusFor(idea.truthStatus), idea.id).not.toBe("in-world");
       }
+    }
+  });
+
+  it("has a presentation for every child status, with no shared identity", () => {
+    const labels = childStatusLegend.map((status) => status.label);
+    expect(new Set(labels).size).toBe(childStatusLegend.length);
+    for (const status of childStatusLegend) {
+      expect(childStatusMetaFor(status.id)).toBe(status);
+      expect(status.label.trim()).not.toBe("");
+      expect(status.explanation.trim()).not.toBe("");
+      expect(status.icon.trim()).not.toBe("");
+    }
+  });
+});
+
+describe("internal owner taxonomy", () => {
+  it("gives every internal category a distinct, non-empty child-facing topic label", () => {
+    const labels = allInternalCategories.map((category) => childTopicLabelFor(category));
+
+    expect(allInternalCategories.length).toBeGreaterThan(0);
+    expect(new Set(allInternalCategories).size).toBe(allInternalCategories.length);
+    expect(new Set(labels).size, "topic labels must be pairwise distinct").toBe(labels.length);
+    for (const label of labels) {
+      expect(label.trim()).not.toBe("");
+    }
+  });
+
+  it("uses only internal categories that the shared taxonomy knows", () => {
+    for (const idea of avaloriaIdeas) {
+      expect(allInternalCategories, `${idea.id} has an unknown owner`).toContain(idea.internalCategory);
+    }
+  });
+});
+
+describe("child-safe vocabulary", () => {
+  function expectChildSafe(visible: string, context: string): void {
+    for (const word of childUnsafeVocabulary) {
+      expect(visible, `${context} must not expose ${word}`).not.toContain(word);
+    }
+  }
+
+  it("keeps idea titles and summaries free of project jargon", () => {
+    for (const idea of avaloriaIdeas) {
+      expectChildSafe(`${idea.title} ${idea.summary}`, idea.id);
+    }
+  });
+
+  it("keeps every topic label free of project jargon", () => {
+    for (const category of allInternalCategories) {
+      expectChildSafe(childTopicLabelFor(category), `topic label ${category}`);
+    }
+  });
+
+  it("keeps every status label and explanation free of project jargon", () => {
+    for (const status of childStatusLegend) {
+      expectChildSafe(`${status.label} ${status.explanation}`, `status ${status.id}`);
     }
   });
 });

@@ -8,18 +8,14 @@ import {
   avaloriaIdeas,
   childCategories,
   childStatusFor,
-  childStatusMeta,
+  childStatusLegend,
+  childStatusMetaFor,
   currentQuestion,
-  internalCategoryLabel,
   type ChildCategory,
-  type ChildStatus,
 } from "@/content/avaloria-content";
+import { childTopicLabelFor } from "@/content/content-source";
 
 const repository = createBrowserSubmissionRepository();
-
-function statusFor(status: ChildStatus) {
-  return childStatusMeta.find((item) => item.id === status) ?? childStatusMeta[0];
-}
 
 export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState<ChildCategory | "Alle Ideen">("Alle Ideen");
@@ -99,7 +95,7 @@ export default function HomePage() {
           <p className="section-support">Jede Karte erklärt sich selbst. Die Farbe ist nur eine Hilfe.</p>
         </div>
         <div className="status-grid">
-          {childStatusMeta.map((status) => (
+          {childStatusLegend.map((status) => (
             <article className={`status-card status-${status.id}`} key={status.id}>
               <span className="status-icon" aria-hidden="true">{status.icon}</span>
               <div>
@@ -142,18 +138,18 @@ export default function HomePage() {
         </div>
         <div className="idea-grid">
           {visibleIdeas.map((idea) => {
-            const status = statusFor(childStatusFor(idea.truthStatus));
+            const status = childStatusMetaFor(childStatusFor(idea.truthStatus));
             return (
               <article className="idea-card" key={idea.id}>
                 <div className="idea-card-topline">
-                  <span className={`idea-status status-${childStatusFor(idea.truthStatus)}`}>
+                  <span className={`idea-status status-${status.id}`}>
                     <span aria-hidden="true">{status.icon}</span> {status.label}
                   </span>
                   <span className="idea-category">{idea.childCategory}</span>
                 </div>
                 <h3>{idea.title}</h3>
                 <p>{idea.summary}</p>
-                <span className="idea-owner">Thema: {internalCategoryLabel(idea.internalCategory)}</span>
+                <span className="idea-owner">Thema: {childTopicLabelFor(idea.internalCategory)}</span>
               </article>
             );
           })}

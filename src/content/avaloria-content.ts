@@ -1,4 +1,10 @@
-import { designSsotPage, jiraSource, type SourceReference, type TruthStatus } from "./content-source";
+import {
+  designSsotPage,
+  jiraSource,
+  type InternalCategory,
+  type SourceReference,
+  type TruthStatus,
+} from "./content-source";
 
 export type ChildStatus = "in-world" | "idea" | "open" | "tryout";
 
@@ -10,21 +16,6 @@ export type ChildCategory =
   | "Gemeinsam spielen"
   | "Offene Ideen";
 
-/**
- * Internal owner taxonomy. Stays finer-grained than the child view on purpose:
- * MCL-19/MCL-29 require the simplified child grouping to lose no owner information.
- * "prologue" and "main-story" must never be merged.
- */
-export type InternalCategory =
-  | "prologue"
-  | "main-story"
-  | "world-geography"
-  | "creatures"
-  | "progression"
-  | "orders-and-roles"
-  | "crafting"
-  | "persistent-world";
-
 export type AvaloriaIdea = Readonly<{
   id: string;
   title: string;
@@ -35,21 +26,42 @@ export type AvaloriaIdea = Readonly<{
   source: SourceReference;
 }>;
 
-export const childStatusMeta: ReadonlyArray<{
+export type ChildStatusPresentation = Readonly<{
   id: ChildStatus;
   label: string;
   explanation: string;
   icon: string;
-}> = [
-  { id: "in-world", label: "Schon dabei", explanation: "Das gehört schon zu Avaloria.", icon: "✦" },
-  { id: "idea", label: "Eine Idee", explanation: "Das könnte später in Avaloria sein.", icon: "✎" },
-  { id: "open", label: "Noch offen", explanation: "Das ist noch nicht entschieden.", icon: "?" },
-  { id: "tryout", label: "Zum Ausprobieren", explanation: "Das können wir gemeinsam testen.", icon: "➜" },
-];
+}>;
+
+/**
+ * Total lookup: a child status without a presentation is a compile error. There is
+ * deliberately no fallback entry - defaulting an unknown status to "Schon dabei"
+ * would tell a child that an undecided idea is already part of Avaloria.
+ */
+const childStatusPresentations = {
+  "in-world": { id: "in-world", label: "Schon dabei", explanation: "Das gehört schon zu Avaloria.", icon: "✦" },
+  idea: { id: "idea", label: "Eine Idee", explanation: "Das könnte später in Avaloria sein.", icon: "✎" },
+  open: { id: "open", label: "Noch offen", explanation: "Das ist noch nicht entschieden.", icon: "?" },
+  tryout: { id: "tryout", label: "Zum Ausprobieren", explanation: "Das können wir gemeinsam testen.", icon: "➜" },
+} as const satisfies Record<ChildStatus, ChildStatusPresentation>;
+
+export function childStatusMetaFor(status: ChildStatus): ChildStatusPresentation {
+  return childStatusPresentations[status];
+}
+
+/** Reading order of the four status cards in the child-facing legend. */
+export const childStatusLegend = [
+  childStatusPresentations["in-world"],
+  childStatusPresentations.idea,
+  childStatusPresentations.open,
+  childStatusPresentations.tryout,
+] as const satisfies ReadonlyArray<ChildStatusPresentation>;
 
 /**
  * The child view never shows the internal truth vocabulary. AMBIGUOUS and CONFLICT
  * both read as "noch offen" for a child: the project has not decided yet.
+ * Only STATED may ever map to "in-world" - see the pinned mapping table in
+ * tests/unit/avaloria-content.test.ts.
  */
 export function childStatusFor(truthStatus: TruthStatus): ChildStatus {
   switch (truthStatus) {
@@ -64,40 +76,14 @@ export function childStatusFor(truthStatus: TruthStatus): ChildStatus {
   }
 }
 
-/** Child-facing label for the internal owner category, kept free of project jargon. */
-export function internalCategoryLabel(internalCategory: InternalCategory): string {
-  switch (internalCategory) {
-    case "prologue":
-      return "Anfang der Geschichte";
-    case "main-story":
-      return "Hauptgeschichte";
-    case "world-geography":
-      return "Orte in Avaloria";
-    case "creatures":
-      return "Wesen und Tiere";
-    case "progression":
-      return "Größer werden";
-    case "orders-and-roles":
-      return "Gruppen und Rollen";
-    case "crafting":
-      return "Bauen und Sammeln";
-    case "persistent-world":
-      return "Gemeinsame Welt";
-  }
-}
-
-export const childCategories: ReadonlyArray<{
-  label: ChildCategory;
-  icon: string;
-  description: string;
-}> = [
+export const childCategories = [
   { label: "Geschichte & Welt", icon: "✦", description: "Orte, Reisen und die große Geschichte" },
   { label: "Wesen & Figuren", icon: "◈", description: "Freunde, Tiere und andere Wesen" },
   { label: "Quests & Abenteuer", icon: "⚑", description: "Aufgaben, Rätsel und spannende Wege" },
   { label: "Ausrüstung & Bauen", icon: "⬡", description: "Sachen, Häuser und eigene Plätze" },
   { label: "Gemeinsam spielen", icon: "♢", description: "Ideen, die mit anderen Spaß machen" },
   { label: "Offene Ideen", icon: "?", description: "Fragen, die wir noch entscheiden" },
-];
+] as const satisfies ReadonlyArray<{ label: ChildCategory; icon: string; description: string }>;
 
 /**
  * Every entry restates something the project has already written down.

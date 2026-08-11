@@ -8,6 +8,8 @@ const required = [
   "next.config.ts",
   "eslint.config.mjs",
   "src/app/page.tsx",
+  "src/content/content-source.ts",
+  "src/content/avaloria-content.ts",
   "src/domain/submissions/submission.ts",
   "src/application/submissions/submission-repository.ts",
   "src/adapters/persistence/indexeddb-submission-repository.ts",
