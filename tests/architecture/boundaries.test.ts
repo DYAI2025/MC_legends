@@ -23,8 +23,13 @@ async function expectNoForbiddenSource(
   forbidden: RegExp[],
   exclude: readonly string[] = [],
 ): Promise<void> {
-  for (const file of await sourceFilesAt(target)) {
-    if (exclude.includes(file)) continue;
+  const files = (await sourceFilesAt(target)).filter((file) => !exclude.includes(file));
+
+  // Without this, any regression in the walker turns every case below into a test
+  // that checks nothing and still passes.
+  expect(files.length, `${target} matched no source files to check`).toBeGreaterThan(0);
+
+  for (const file of files) {
     const source = await readFile(file, "utf8");
     for (const pattern of forbidden) {
       expect(source, `${file} must not match ${pattern}`).not.toMatch(pattern);
@@ -56,10 +61,12 @@ describe("architecture boundaries", () => {
     ]);
   });
 
-  it("lets only the domain module assign the server acknowledged status", async () => {
+  it("lets only the domain module name the server acknowledged status", async () => {
+    // The bare literal, not an assignment shape: `{ status: ACK }` via a constant and
+    // `{ ["status"]: "SERVER_ACKNOWLEDGED" }` both evade a `status:`-anchored pattern.
     await expectNoForbiddenSource(
       "src",
-      [/\bstatus\s*[:=]\s*["']SERVER_ACKNOWLEDGED["']/],
+      [/SERVER_ACKNOWLEDGED/],
       ["src/domain/submissions/submission.ts"],
     );
   });
