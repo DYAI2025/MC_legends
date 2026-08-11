@@ -15,6 +15,13 @@ import type {
  * No codes, no technical detail, and never a claim of arrival - only the acknowledged
  * status may say that, and it says it through submissionStatusLabel.
  */
+/**
+ * Everything a child can be told went wrong. Three come from a delivery attempt;
+ * "not-saved" happens before one is even made, when the answer could not be stored on
+ * this device at all - the single case where it is *not* safe here.
+ */
+export type ChildFailureReason = DeliveryFailureReason | "not-saved";
+
 const failureMessages = {
   transport:
     "Deine Antwort ist sicher auf diesem Gerät. Wir konnten das Projekt gerade nicht erreichen. Du kannst sie später noch einmal senden.",
@@ -22,7 +29,13 @@ const failureMessages = {
     "Deine Antwort ist sicher auf diesem Gerät. Das Projekt konnte sie diesmal nicht annehmen.",
   "local-save":
     "Deine Antwort ist sicher auf diesem Gerät. Du kannst sie später noch einmal senden.",
-} as const satisfies Record<DeliveryFailureReason, string>;
+  // Deliberately promises nothing about the answer being kept: nothing was written.
+  "not-saved": "Das hat noch nicht geklappt. Versuch es bitte noch einmal.",
+} as const satisfies Record<ChildFailureReason, string>;
+
+export function childFailureMessage(reason: ChildFailureReason): string {
+  return failureMessages[reason];
+}
 
 /**
  * A failure without a reason cannot be described more precisely than "it is here and

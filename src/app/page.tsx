@@ -12,7 +12,7 @@ import {
   submissionStatusLabel,
   type TextSubmission,
 } from "@/domain/submissions/submission";
-import { childMessageFor } from "@/app/child-submission-message";
+import { childFailureMessage, childMessageFor } from "@/app/child-submission-message";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import {
   avaloriaIdeas,
@@ -85,7 +85,9 @@ export default function HomePage() {
       // Only the outcome of a real delivery attempt may change that sentence.
       setSavedMessage(childMessageFor(await deliverSubmission(saved, repository, inbox)));
     } catch {
-      setSavedMessage("Das hat noch nicht geklappt. Versuch es bitte noch einmal.");
+      // submitText threw, so nothing was stored - the one case where a child must not
+      // be told their answer is safe here.
+      setSavedMessage(childFailureMessage("not-saved"));
     } finally {
       setIsSaving(false);
       await refreshSubmissions();
@@ -107,6 +109,15 @@ export default function HomePage() {
     try {
       const message = childMessageFor(await deliverSubmission(submission, repository, inbox));
       setRetryMessages((previous) => ({ ...previous, [submission.id]: message }));
+    } catch {
+      // deliverSubmission catches its own failures today, so nothing should reach
+      // here - but that is a property of a different module, not of this call site. A
+      // failure nobody can name is still a failure a child has to be told about, and
+      // the answer is genuinely still stored, because it was listed from there.
+      setRetryMessages((previous) => ({
+        ...previous,
+        [submission.id]: childMessageFor({ delivered: false, submission }),
+      }));
     } finally {
       setRetryingId(null);
       await refreshSubmissions();
