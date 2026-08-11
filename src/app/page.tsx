@@ -4,13 +4,28 @@ import { childStatusMeta } from "@/content/avaloria-content";
 export default function HomePage() {
   return (
     <main className="site-shell">
-      <section className="hero" aria-labelledby="page-title">
+      <nav className="topbar" aria-label="Hauptnavigation">
+        <a className="brand" href="#start" aria-label="Avaloria Startseite">
+          <span className="brand-mark" aria-hidden="true">A</span>
+          <span>Avaloria</span>
+        </a>
+        <div className="topbar-links">
+          <a href="#status-heading">Ideen ansehen</a>
+          <a href="#frage">Frage beantworten</a>
+        </div>
+        <a className="profile-button" href="#frage">Mein Bereich</a>
+      </nav>
+      <section className="hero" id="start" aria-labelledby="page-title">
         <div className="hero-copy">
           <p className="hero-kicker"><span aria-hidden="true">✦</span> Avaloria · Konzept</p>
           <h1 id="page-title">Willkommen in Avaloria.</h1>
           <p className="hero-intro">
             Eine eigene Blockwelt mit grünen Tälern, hellen Türmen und neuen Wegen zum Entdecken.
           </p>
+          <div className="hero-actions">
+            <a className="button button-primary" href="#ideen">Idee teilen <span aria-hidden="true">→</span></a>
+            <a className="button button-secondary" href="#frage">Frage beantworten <span aria-hidden="true">→</span></a>
+          </div>
           <p className="hero-note"><span aria-hidden="true">●</span> Dieses Bild ist ein Konzept für die Website.</p>
         </div>
         <div className="hero-visual" aria-label="Konzeptbild von Avaloria">
