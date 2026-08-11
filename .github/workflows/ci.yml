@@ -38,6 +38,9 @@ jobs:
       - name: Foundation structure
         run: npm run check:foundation
 
+      - name: Secret scan
+        run: npm run check:secrets
+
       - name: Lint
         run: npm run lint
 
