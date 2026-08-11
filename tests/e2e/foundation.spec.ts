@@ -53,7 +53,7 @@ test("the child view keeps six easy-to-understand idea groups", async ({ page })
   await historyChip.click();
   await expect(page.getByRole("button", { name: "Geschichte & Welt", pressed: true })).toBeVisible();
 
-  await expect(page.getByRole("heading", { name: "Das Tor ins grüne Tal" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Die Lichter von Avaloria" })).toBeVisible();
-  await expect(page.locator(".idea-card")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Zwanzig Jahre Wiederaufbau" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Die Druhen werden stärker" })).toBeVisible();
+  await expect(page.locator(".idea-card")).toHaveCount(6);
 });
