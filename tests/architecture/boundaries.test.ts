@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -13,8 +13,18 @@ async function filesBelow(directory: string): Promise<string[]> {
   return files.flat().filter((path) => /\.(ts|tsx)$/.test(path));
 }
 
-async function expectNoForbiddenImports(directory: string, forbidden: RegExp[]): Promise<void> {
-  for (const file of await filesBelow(directory)) {
+/** Accepts a directory to walk or a single source file named directly. */
+async function sourceFilesAt(target: string): Promise<string[]> {
+  return (await stat(target)).isDirectory() ? filesBelow(target) : [target];
+}
+
+async function expectNoForbiddenSource(
+  target: string,
+  forbidden: RegExp[],
+  exclude: readonly string[] = [],
+): Promise<void> {
+  for (const file of await sourceFilesAt(target)) {
+    if (exclude.includes(file)) continue;
     const source = await readFile(file, "utf8");
     for (const pattern of forbidden) {
       expect(source, `${file} must not match ${pattern}`).not.toMatch(pattern);
@@ -24,7 +34,7 @@ async function expectNoForbiddenImports(directory: string, forbidden: RegExp[]):
 
 describe("architecture boundaries", () => {
   it("keeps the domain independent from framework, application, and adapters", async () => {
-    await expectNoForbiddenImports("src/domain", [
+    await expectNoForbiddenSource("src/domain", [
       /from ["']next(?:\/|["'])/,
       /from ["']react(?:\/|["'])/,
       /from ["']@\/application\//,
@@ -33,14 +43,29 @@ describe("architecture boundaries", () => {
   });
 
   it("keeps the application independent from Next.js and concrete adapters", async () => {
-    await expectNoForbiddenImports("src/application", [
+    await expectNoForbiddenSource("src/application", [
       /from ["']next(?:\/|["'])/,
       /from ["']@\/adapters\//,
     ]);
   });
 
+  it("keeps the browser composition root out of the server composition root", async () => {
+    await expectNoForbiddenSource("src/composition/browser.ts", [
+      /from ["']@\/composition\/server["']/,
+      /from ["']node:/,
+    ]);
+  });
+
+  it("lets only the domain module assign the server acknowledged status", async () => {
+    await expectNoForbiddenSource(
+      "src",
+      [/\bstatus\s*[:=]\s*["']SERVER_ACKNOWLEDGED["']/],
+      ["src/domain/submissions/submission.ts"],
+    );
+  });
+
   it("keeps the content datasets independent from the delivery layer", async () => {
-    await expectNoForbiddenImports("src/content", [
+    await expectNoForbiddenSource("src/content", [
       /from ["']next(?:\/|["'])/,
       /from ["']react(?:\/|["'])/,
       /from ["']@\/adapters\//,

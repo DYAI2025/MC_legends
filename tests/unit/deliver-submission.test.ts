@@ -140,6 +140,41 @@ describe("deliverSubmission", () => {
     expect(stored.receipt).toBeUndefined();
   });
 
+  it("reports a failed delivery when the local save fails after a real acknowledgement", async () => {
+    const submission = newSubmission();
+
+    class RejectingOnAcknowledgedRepository extends InMemorySubmissionRepository {
+      override async save(candidate: TextSubmission): Promise<void> {
+        if (candidate.status === "SERVER_ACKNOWLEDGED") {
+          throw new Error("IndexedDB save failed");
+        }
+        await super.save(candidate);
+      }
+    }
+
+    const repository = new RejectingOnAcknowledgedRepository();
+    await repository.save(submission);
+
+    const inbox: SubmissionInbox = {
+      async deliver(): Promise<ServerReceipt> {
+        return { receiptId: "receipt-779", receivedAt: "2026-08-11T10:10:00.000Z" };
+      },
+    };
+
+    const outcome = await deliverSubmission(submission, repository, inbox);
+
+    // Understating what arrived is the accepted direction: never tell a child an
+    // answer reached the project when this device could not record that it did.
+    expect(outcome.delivered).toBe(false);
+    expect(outcome.submission).toBe(submission);
+    expect(outcome.submission.status).toBe("LOCAL_ONLY");
+
+    const stored = await storedSubmission(repository, submission);
+    expect(stored.status).toBe("LOCAL_ONLY");
+    expect(stored.originalText).toBe(ORIGINAL_TEXT);
+    expect(stored.receipt).toBeUndefined();
+  });
+
   it("acknowledges on a retry after a first failed delivery", async () => {
     const submission = newSubmission();
     const repository = new InMemorySubmissionRepository();
