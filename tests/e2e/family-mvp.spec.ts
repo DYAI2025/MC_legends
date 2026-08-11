@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { childMessageFor } from "@/app/child-submission-message";
 import { avaloriaIdeas } from "@/content/avaloria-content";
 import {
+  childStatusLegend,
   childTopicLabelFor,
   childUnsafeVocabulary,
   type InternalCategory,
@@ -156,6 +157,39 @@ test("a failed answer survives a reload and can be sent again from the keyboard"
   await expect(myIdeas.getByText(onDeviceLabel)).toHaveCount(0);
 });
 
+/**
+ * The legend teaches four signs and says what each one means. A submission badge that
+ * wears one of them tells a child their own answer is "Schon dabei - das gehört schon
+ * zu Avaloria", which is the exact claim this slice exists to keep unfakeable.
+ */
+test("the answer status badge borrows no sign from the idea legend", async ({ page }) => {
+  await page.route(inboxRoute, (route) => route.abort("failed"));
+  await page.goto("/");
+  await sendAnswer(page);
+
+  const myIdeas = myIdeasSection(page);
+  const badge = myIdeas.locator(".my-idea-status");
+
+  async function expectNoLegendSign(expected: string) {
+    // Exact text, so an icon prepended to the label would fail here too.
+    await expect(badge).toHaveText(expected);
+    for (const status of childStatusLegend) {
+      await expect(badge, `must not wear the "${status.label}" class`).not.toHaveClass(
+        new RegExp(`\\bstatus-${status.id}\\b`),
+      );
+      await expect(badge, `must not wear the "${status.label}" icon`).not.toContainText(status.icon);
+    }
+  }
+
+  // The legend shows exactly the signs it promises, and the badge adds none.
+  await expect(page.locator(".status-card")).toHaveCount(childStatusLegend.length);
+  await expectNoLegendSign(onDeviceLabel);
+
+  await page.unroute(inboxRoute);
+  await myIdeas.getByRole("button", { name: "Noch einmal senden" }).click();
+  await expectNoLegendSign(arrivedLabel);
+});
+
 test("a failed retry explains itself where the child tapped it", async ({ page }) => {
   await page.route(inboxRoute, (route) => route.abort("failed"));
   await page.goto("/");
@@ -219,15 +253,29 @@ test("an empty or whitespace-only answer cannot be sent", async ({ page }) => {
   await expect(myIdeasSection(page).locator(".my-idea")).toHaveCount(0);
 });
 
-test("the answer form is reachable and usable with the keyboard", async ({ page }) => {
+test("the answer form sits in the keyboard tab order and can be typed into", async ({ page }) => {
   await page.goto("/");
   const textarea = page.getByLabel("Deine Antwort");
-  await textarea.focus();
+  const submit = page.getByRole("button", { name: "Antwort speichern" });
+
+  // The button stays disabled until there is something to send, and a disabled button
+  // cannot take focus - so the tab-order check needs content in the field first.
+  await textarea.fill(answerText);
+  await expect(submit).toBeEnabled();
+
+  // Tabbing backwards from the button is what proves the field is in the tab order.
+  // Calling focus() on it and tabbing forward would prove only that focus() works.
+  await submit.focus();
+  await page.keyboard.press("Shift+Tab");
   await expect(textarea).toBeFocused();
 
+  // Clear it and retype with the keyboard alone, then tab forward again.
+  await textarea.fill("");
   await page.keyboard.type(answerText);
+  await expect(textarea).toHaveValue(answerText);
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Antwort speichern" })).toBeFocused();
+  await expect(submit).toBeFocused();
+  await expect(submit).toBeEnabled();
 });
 
 test.describe("reduced motion", () => {

@@ -123,9 +123,15 @@ export default function HomePage() {
         <div className="topbar-links">
           <a href="#ideen">Ideen ansehen</a>
           <a href="#frage">Frage beantworten</a>
-          <a href="#meine-ideen">Meine Ideen</a>
         </div>
-        <a className="profile-button" href="#frage">Mein Bereich</a>
+        {/*
+          "Mein Bereich" predated any personal area existing and pointed at the
+          question form. Now that "Meine Ideen" is that area, one name and one target -
+          two differently worded links to the same promise read as two places to an
+          eight-year-old. This one stays in the top bar because .topbar-links is hidden
+          on small screens, so it is the only route to the section on a phone.
+        */}
+        <a className="profile-button" href="#meine-ideen">Meine Ideen</a>
       </nav>
 
       <section className="hero" id="start" aria-labelledby="page-title">
@@ -274,8 +280,14 @@ export default function HomePage() {
               return (
                 <li className="my-idea" key={submission.id}>
                   <p className="my-idea-text">{submission.originalText}</p>
-                  <p className={`my-idea-status status-${arrived ? "in-world" : "open"}`}>
-                    <span aria-hidden="true">{arrived ? "✦" : "▣"}</span>{" "}
+                  {/*
+                    Deliberately not the legend's status-* classes or icons. Those
+                    signs are taught above as facts about Avaloria ("Schon dabei"), and
+                    a submission wearing one would claim exactly what this slice keeps
+                    unfakeable. Filled versus outlined, so the two read apart without
+                    relying on colour.
+                  */}
+                  <p className={`my-idea-status ${arrived ? "my-idea-arrived" : "my-idea-local"}`}>
                     {submissionStatusLabel(submission.status)}
                   </p>
                   {arrived ? null : (
