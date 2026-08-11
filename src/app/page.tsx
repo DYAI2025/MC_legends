@@ -39,6 +39,11 @@ export default function HomePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [submissions, setSubmissions] = useState<readonly TextSubmission[]>([]);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  // Keyed by submission id so a retry's outcome is shown at the entry it belongs to,
+  // not in the form's status line far above the button the child actually pressed.
+  const [retryMessages, setRetryMessages] = useState<Readonly<Record<string, string | undefined>>>(
+    {},
+  );
   const visibleIdeas = useMemo(
     () =>
       selectedCategory === "Alle Ideen"
@@ -93,8 +98,15 @@ export default function HomePage() {
     if (retryingId !== null) return;
 
     setRetryingId(submission.id);
+    // Drop the previous outcome first, so a stale sentence cannot sit under the
+    // button while the new attempt is still running.
+    setRetryMessages((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([id]) => id !== submission.id)),
+    );
+
     try {
-      setSavedMessage(childMessageFor(await deliverSubmission(submission, repository, inbox)));
+      const message = childMessageFor(await deliverSubmission(submission, repository, inbox));
+      setRetryMessages((previous) => ({ ...previous, [submission.id]: message }));
     } finally {
       setRetryingId(null);
       await refreshSubmissions();
@@ -275,6 +287,14 @@ export default function HomePage() {
                     >
                       {retryingId === submission.id ? "Wird gesendet …" : "Noch einmal senden"}
                     </button>
+                  )}
+                  {arrived || retryMessages[submission.id] === undefined ? null : (
+                    // Only an entry that is still here needs a sentence explaining
+                    // why. Once it arrived, the status above says so on its own, and
+                    // repeating it would state the same thing twice.
+                    <p className="my-idea-message" role="status">
+                      {retryMessages[submission.id]}
+                    </p>
                   )}
                 </li>
               );

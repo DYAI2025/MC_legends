@@ -98,6 +98,7 @@ textarea::placeholder { color: #9aa69c; }
 .my-idea { background: #fff; border: 1px solid var(--line); border-radius: 18px; display: grid; gap: 10px; justify-items: start; padding: 18px 20px; }
 .my-idea-text { line-height: 1.5; margin: 0; white-space: pre-wrap; }
 .my-idea-status { align-items: center; border-radius: 999px; display: inline-flex; font-size: .78rem; font-weight: 900; gap: 6px; margin: 0; padding: 6px 10px; }
+.my-idea-message { color: var(--muted); font-size: .82rem; line-height: 1.5; margin: 0; }
 .footer { border-top: 1px solid var(--line); color: var(--muted); display: flex; font-size: .75rem; font-weight: 700; justify-content: space-between; padding: 22px 0 34px; }
 
 @media (max-width: 900px) {

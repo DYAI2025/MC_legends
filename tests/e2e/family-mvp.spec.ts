@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { childMessageFor } from "@/app/child-submission-message";
 import { avaloriaIdeas } from "@/content/avaloria-content";
 import {
   childTopicLabelFor,
@@ -6,7 +7,7 @@ import {
   type InternalCategory,
 } from "@/content/content-source";
 import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
-import { submissionStatusLabel } from "@/domain/submissions/submission";
+import { createTextSubmission, submissionStatusLabel } from "@/domain/submissions/submission";
 
 const removedDemoStrings = [
   "Das Tor ins grüne Tal",
@@ -22,12 +23,40 @@ const onDeviceLabel = submissionStatusLabel("LOCAL_ONLY");
 const answerText = "Mein Tier ist ein kleiner Steinwolf.";
 const inboxRoute = "**/api/inbox/submissions";
 
+/**
+ * The child-facing sentences, taken from the module that owns them rather than
+ * retyped. The two failure reasons read differently on purpose, which is what lets a
+ * test tell the retry's own outcome apart from the one the form is still showing.
+ */
+const messageFixture = createTextSubmission(
+  { questionId: focusQuestion().id, originalText: answerText },
+  { createId: () => "e2e-message-fixture", now: () => new Date("2026-08-11T00:00:00.000Z") },
+);
+const refusedMessage = childMessageFor({
+  delivered: false,
+  reason: "refused",
+  submission: messageFixture,
+});
+
 function ideasOwnedBy(internalCategory: InternalCategory) {
   return avaloriaIdeas.filter((idea) => idea.internalCategory === internalCategory);
 }
 
 function myIdeasSection(page: Page) {
   return page.getByRole("region", { name: "Das hast du schon geschickt." });
+}
+
+/**
+ * Longest transition on an element, in seconds. `.button` transitions two properties,
+ * so reading only the first value would leave the slower one unchecked.
+ */
+async function settleSeconds(locator: Locator): Promise<number> {
+  const durations = await locator.evaluate((element) =>
+    getComputedStyle(element)
+      .transitionDuration.split(",")
+      .map((value) => Number.parseFloat(value)),
+  );
+  return Math.max(...durations);
 }
 
 async function sendAnswer(page: Page) {
@@ -127,6 +156,39 @@ test("a failed answer survives a reload and can be sent again from the keyboard"
   await expect(myIdeas.getByText(onDeviceLabel)).toHaveCount(0);
 });
 
+test("a failed retry explains itself where the child tapped it", async ({ page }) => {
+  await page.route(inboxRoute, (route) => route.abort("failed"));
+  await page.goto("/");
+  await sendAnswer(page);
+
+  const myIdeas = myIdeasSection(page);
+  await expect(myIdeas.getByText(onDeviceLabel)).toBeVisible();
+
+  // The retry meets a different kind of failure, so its sentence is distinguishable
+  // from the one the form far above is still showing. Without that, a message left
+  // behind at the top of the page could pass for the retry's own answer.
+  await page.unroute(inboxRoute);
+  await page.route(inboxRoute, (route) =>
+    route.fulfill({ status: 400, contentType: "application/json", body: "{}" }),
+  );
+
+  // Clicking scrolls the button into view, so the child really is at the bottom.
+  await myIdeas.getByRole("button", { name: "Noch einmal senden" }).click();
+
+  const outcome = page.getByRole("status").filter({ hasText: refusedMessage });
+  await expect(outcome).toHaveCount(1);
+  await expect(outcome).toBeVisible();
+  // The point of this test: readable without scrolling back to the form.
+  await expect(outcome).toBeInViewport();
+  // And it really is inside the section the retry happened in.
+  await expect(myIdeas.getByRole("status")).toHaveText(refusedMessage);
+
+  // The retry failed, so nothing may have changed about what the entry claims.
+  await expect(myIdeas.getByText(onDeviceLabel)).toBeVisible();
+  await expect(myIdeas.getByText(answerText)).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(arrivedLabel);
+});
+
 test("the child view stays free of technical vocabulary in the failure case", async ({ page }) => {
   await page.route(inboxRoute, (route) => route.abort("failed"));
   await page.goto("/");
@@ -174,17 +236,14 @@ test.describe("reduced motion", () => {
   test.use({ contextOptions: { reducedMotion: "reduce" } });
 
   test("the whole flow works and needs no animation to operate", async ({ page }) => {
+    await page.route(inboxRoute, (route) => route.abort("failed"));
     await page.goto("/");
 
-    // The reduced-motion stylesheet really applied - otherwise the rest of this test
-    // would only prove that the flow works, not that it works without motion.
+    // Only values that actually differ with and without the setting are asserted.
+    // An animationName check would be decoration: this stylesheet declares no
+    // @keyframes at all, so it reads "none" even if reduced motion were broken.
     const submit = page.getByRole("button", { name: "Antwort speichern" });
-    const buttonMotion = await submit.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { transitionDuration: style.transitionDuration, animationName: style.animationName };
-    });
-    expect(Number.parseFloat(buttonMotion.transitionDuration)).toBeLessThan(0.001);
-    expect(buttonMotion.animationName).toBe("none");
+    expect(await settleSeconds(submit)).toBeLessThan(0.001);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior)).toBe(
       "auto",
     );
@@ -195,15 +254,16 @@ test.describe("reduced motion", () => {
     await expect(myIdeas).toBeInViewport();
 
     await sendAnswer(page);
-    await expect(myIdeas.getByText(arrivedLabel)).toBeVisible();
+    await expect(myIdeas.getByText(onDeviceLabel)).toBeVisible();
 
-    // The new list entry is readable on arrival: nothing is hidden behind a reveal.
-    const entryMotion = await myIdeas.locator(".my-idea").evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { opacity: style.opacity, animationName: style.animationName };
-    });
-    expect(entryMotion.opacity).toBe("1");
-    expect(entryMotion.animationName).toBe("none");
+    // The retry button is the one element inside the new section that transitions by
+    // default, so it is where the override has to be observable rather than assumed.
+    const retry = myIdeas.getByRole("button", { name: "Noch einmal senden" });
+    expect(await settleSeconds(retry)).toBeLessThan(0.001);
+
+    await page.unroute(inboxRoute);
+    await retry.click();
+    await expect(myIdeas.getByText(arrivedLabel)).toBeVisible();
   });
 });
 
