@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# testing
+/coverage/
+/playwright-report/
+/test-results/
+
+# environment
+.env
+.env.*
+!.env.example
+
+# local tooling
+.DS_Store
+*.log
+npm-debug.log*
+
+# editors
+.idea/
+.vscode/
+
+# generated evidence
+artifacts/
+
+# local generator validation logs
+/.validation/

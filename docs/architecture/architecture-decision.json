@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "decision_id": "AD-001",
+  "generated_at": "2026-08-10T23:19:01Z",
+  "status": "conditional",
+  "context": "Select the smallest web foundation that supports Sprint-1 local persistence and a Sprint-2 server seam without pre-empting the unresolved MCL-1 Minecraft-versus-standalone decision.",
+  "hard_constraints": ["HC-001 no Minecraft loader/engine selection before MCL-1","HC-002 browser-local persistence","HC-003 persistence behind application port","HC-004 truthful server-ack status","HC-005 no frontend service secrets","HC-006 immutable original submissions"],
+  "quality_scenarios": ["QS-001","QS-002","QS-003","QS-004"],
+  "candidates": [
+    {
+      "id":"CAND-001","name":"React/Vite SPA plus separate API later","kind":"minimum_viable_architecture","summary":"Static/browser-first client with a second backend project introduced for Sprint 2.","feasibility":"feasible",
+      "hard_constraint_results":[
+        {"constraint_id":"HC-001","status":"satisfied","evidence_refs":["EV-001"]},
+        {"constraint_id":"HC-002","status":"satisfied","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-003","status":"satisfied","evidence_refs":["EV-002"]},
+        {"constraint_id":"HC-004","status":"satisfied","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-005","status":"satisfied","evidence_refs":["EV-005"]},
+        {"constraint_id":"HC-006","status":"satisfied","evidence_refs":["EV-002"]}
+      ],
+      "scores":{"requirement_fit":4.4,"modifiability":4.2,"delivery_speed":4.0,"operability":3.2,"reversibility":4.5,"evidence_strength":3.8},
+      "risks":["Sprint 2 creates a second runtime/deployment surface before independent operations are demonstrated."],
+      "non_risks":["Local IndexedDB works naturally in a SPA."],
+      "sensitivity_points":["Whether the backend must become independently operated."],
+      "tradeoff_points":["Static simplicity now versus two-runtime coordination later."],
+      "reversibility":"high","migration_cost":"low","evidence_strength":4
+    },
+    {
+      "id":"CAND-002","name":"Next.js modular monolith with ports/adapters","kind":"balanced_architecture","summary":"One web deployable, framework-free domain/application modules, IndexedDB now and route/server adapters later.","feasibility":"conditional",
+      "hard_constraint_results":[
+        {"constraint_id":"HC-001","status":"satisfied","evidence_refs":["EV-001"]},
+        {"constraint_id":"HC-002","status":"satisfied","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-003","status":"satisfied","evidence_refs":["EV-002","EV-003"]},
+        {"constraint_id":"HC-004","status":"satisfied","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-005","status":"satisfied","evidence_refs":["EV-005"]},
+        {"constraint_id":"HC-006","status":"satisfied","evidence_refs":["EV-002"]}
+      ],
+      "scores":{"requirement_fit":4.8,"modifiability":4.7,"delivery_speed":4.6,"operability":4.4,"reversibility":4.5,"evidence_strength":4.2},
+      "risks":["Web and future server delivery share one deployable.","Framework adapter has not completed a clean install/build in this generation environment."],
+      "non_risks":["A repository port isolates IndexedDB from the application layer.","Next.js provides a future server delivery seam without requiring another service."],
+      "sensitivity_points":["Hosting topology","independent backend ownership","MCL-1 product-format decision"],
+      "tradeoff_points":["One-deployable simplicity versus independent backend deployment."],
+      "reversibility":"high","migration_cost":"low","evidence_strength":4
+    },
+    {
+      "id":"CAND-003","name":"Polyglot monorepo with Web, API, Supabase and Minecraft loader now","kind":"assurance_or_scale_architecture","summary":"Pre-build all imagined deployment and game-runtime surfaces.","feasibility":"infeasible",
+      "hard_constraint_results":[
+        {"constraint_id":"HC-001","status":"violated","notes":"Requires a loader/engine commitment while MCL-1 is open.","evidence_refs":["EV-001"]},
+        {"constraint_id":"HC-002","status":"satisfied","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-003","status":"unknown","evidence_refs":["EV-002"]},
+        {"constraint_id":"HC-004","status":"unknown","evidence_refs":["EV-004"]},
+        {"constraint_id":"HC-005","status":"unknown","evidence_refs":["EV-005"]},
+        {"constraint_id":"HC-006","status":"unknown","evidence_refs":["EV-002"]}
+      ],
+      "scores":{},
+      "risks":["Premature distribution","unjustified infrastructure","direct conflict with unresolved MCL-1"],
+      "non_risks":[],
+      "sensitivity_points":["MCL-1"],
+      "tradeoff_points":["Speculative future coverage versus immediate complexity and irreversible commitment."],
+      "reversibility":"medium","migration_cost":"medium","evidence_strength":2
+    }
+  ],
+  "preferred_candidate_id":"CAND-002",
+  "strongest_counterargument":"If the web experience is confirmed as static/offline-first and the backend must be independently owned/deployed, a Vite SPA plus separate API is structurally cleaner and avoids coupling backend delivery to Next.js.",
+  "decision_rationale":["Meets all currently observed web hard constraints.","Provides the Sprint-2 server seam without introducing a second service now.","Ports/adapters preserve migration to a separate API or Supabase later.","Does not pre-empt MCL-1."],
+  "rejected_alternatives":["CAND-003 is infeasible while MCL-1 is unresolved.","CAND-001 remains the strongest fallback if independent/static deployment becomes a hard constraint."],
+  "consequences":["One web deployment unit initially.","Architecture tests enforce domain/application isolation.","No Minecraft loader, Supabase SDK, auth provider, queue or cache in the foundation."],
+  "risks":[
+    {"id":"RISK-001","statement":"MCL-1 may later select a topology that changes the web application's role.","likelihood":"medium","impact":"high","mitigation":"Keep domain/application framework-free and re-open ADR-0001 on MCL-1 resolution."},
+    {"id":"RISK-002","statement":"Dependency/toolchain build is not locally verified because npm registry access failed in the generator environment.","likelihood":"high","impact":"medium","mitigation":"Require a networked npm install, committed lockfile and full CI before merge."}
+  ],
+  "assumptions":[
+    {"id":"ASM-001","statement":"A Node-capable web deployment is acceptable for the first web MVP.","confidence":3,"review_trigger":"Hosting or product-format decision establishes a static-only/independent backend constraint."}
+  ],
+  "review_triggers":["MCL-1 is resolved","backend requires independent release/operations","hosting rules exclude a Node/Next runtime","offline conflict resolution becomes a core requirement","Supabase/server production story becomes active"],
+  "migration_signals":["Extract API when independent ownership/release or materially different scaling is demonstrated.","Add a Minecraft module only after the product-format/loader ADR is approved."],
+  "diagram_paths":["docs/architecture/C4.md"],
+  "adr_paths":["docs/architecture/ADR-0001-web-foundation.md"],
+  "evidence_refs":["EV-001","EV-002","EV-003","EV-004","EV-005","EV-006","EV-008","EV-009"]
+}

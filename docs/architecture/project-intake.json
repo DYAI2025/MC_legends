@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-10T23:19:01Z",
+  "mode": "PLAN",
+  "repository": {
+    "owner": "DYAI2025",
+    "name": "MC_legends",
+    "remote_url": "https://github.com/DYAI2025/MC_legends.git",
+    "identity_status": "verified",
+    "default_branch": "main",
+    "current_branch": null,
+    "head_sha": null,
+    "worktree_status": "not_a_git_repository",
+    "write_authorized": true,
+    "protection_summary": [
+      "Remote repository is empty; no branch exists to inspect for branch protection through the available connector."
+    ],
+    "existing_pull_requests": []
+  },
+  "product": {
+    "vision": "Provide a child-friendly Avaloria co-creation web experience while keeping the final Minecraft-versus-standalone product format reversible until Jira MCL-1 is resolved.",
+    "target_users": ["children around the intended project age", "family/admin users for later review flows"],
+    "user_problems": [
+      "Children need a simple way to answer one current Avaloria question.",
+      "Users must be told truthfully whether an idea is only local or acknowledged by the project."
+    ],
+    "outcomes": [
+      "Sprint 1 can persist a text submission locally and recover it after reload.",
+      "Sprint 2 can add a server acknowledgement path without rebuilding domain/UI boundaries."
+    ],
+    "scope": [
+      "Web foundation",
+      "submission domain model",
+      "persistence port",
+      "IndexedDB adapter",
+      "quality gates and CI",
+      "architecture and agent documentation"
+    ],
+    "out_of_scope": [
+      "Minecraft loader selection",
+      "standalone game engine selection",
+      "production Supabase integration",
+      "production authentication",
+      "audio upload/transcription",
+      "full Sprint 1 UI implementation"
+    ],
+    "capabilities": ["local submission persistence", "future server acknowledgement seam"],
+    "user_journeys": ["answer current question -> store locally -> show truthful local state"]
+  },
+  "drivers": {
+    "business": [
+      {"id":"DRV-BUS-001","statement":"Reach a testable web increment quickly without committing the unresolved game format.","classification":"hard_constraint","priority":5,"evidence_refs":["EV-001","EV-003"]}
+    ],
+    "domain": [
+      {"id":"DRV-DOM-001","statement":"Original submissions remain immutable source artifacts and acknowledgement state remains explicit.","classification":"hard_constraint","priority":5,"evidence_refs":["EV-002","EV-004"]}
+    ],
+    "data": [
+      {"id":"DRV-DAT-001","statement":"Sprint-1 submissions require stable IDs, timestamps, question reference and browser persistence across reload.","classification":"minimum_requirement","priority":5,"evidence_refs":["EV-004"]}
+    ],
+    "integration": [
+      {"id":"DRV-INT-001","statement":"Server inbox and later Supabase persistence must be addable behind an adapter seam.","classification":"minimum_requirement","priority":5,"evidence_refs":["EV-002","EV-003"]}
+    ],
+    "security_privacy": [
+      {"id":"DRV-SEC-001","statement":"No private server/service credentials may be shipped to the browser.","classification":"hard_constraint","priority":5,"evidence_refs":["EV-002","EV-005"]}
+    ],
+    "reliability": [
+      {"id":"DRV-REL-001","statement":"A locally saved submission must survive browser reload; server-arrived state may only follow acknowledgement.","classification":"minimum_requirement","priority":5,"evidence_refs":["EV-004"]}
+    ],
+    "performance": [
+      {"id":"DRV-PERF-001","statement":"No numeric performance SLO is established in the read backlog; avoid architecture justified by invented scale targets.","classification":"later_optimization","priority":2,"evidence_refs":["EV-003"]}
+    ],
+    "modifiability": [
+      {"id":"DRV-MOD-001","statement":"Changing persistence from IndexedDB to server/Supabase must not require domain/UI reconstruction.","classification":"minimum_requirement","priority":5,"evidence_refs":["EV-002","EV-004"]}
+    ],
+    "operability": [
+      {"id":"DRV-OPS-001","statement":"Prefer one web deployment unit until independent operations are justified.","classification":"weighted_preference","priority":4,"weight":0.8,"evidence_refs":["EV-003"]}
+    ],
+    "cost": [
+      {"id":"DRV-COST-001","statement":"Avoid queues, caches, multiple services and infrastructure without an observed driver.","classification":"weighted_preference","priority":4,"weight":0.8,"evidence_refs":["EV-003"]}
+    ],
+    "team_governance": [
+      {"id":"DRV-TEAM-001","statement":"Development is performed by coding agents; deterministic tests and repository instructions are required handoff controls.","classification":"minimum_requirement","priority":4,"evidence_refs":["EV-010"]}
+    ],
+    "delivery": [
+      {"id":"DRV-DEL-001","statement":"Changes must be delivered through a dedicated GitHub work branch and validated PR flow.","classification":"hard_constraint","priority":5,"evidence_refs":["EV-007"]}
+    ],
+    "platform": [
+      {"id":"DRV-PLAT-001","statement":"The current decision covers the web platform only; Minecraft loader/platform choice remains unresolved under MCL-1.","classification":"hard_constraint","priority":5,"evidence_refs":["EV-001"]}
+    ]
+  },
+  "data_classes": ["child-authored text submissions", "question references", "submission status metadata"],
+  "integrations": ["Browser IndexedDB now", "server inbox later", "Supabase adapter later if approved"],
+  "quality_scenarios": [
+    {"id":"QS-001","attribute":"reliability","source":"child browser session","stimulus":"valid text submission is saved and the page/browser repository is recreated","environment":"normal browser operation","artifact":"submission persistence path","response":"the same submission is loadable with unchanged ID and original text","response_measure":"binary pass: same ID and byte-for-byte original text after reload/repository recreation","priority":"minimum_requirement","evidence_refs":["EV-004"]},
+    {"id":"QS-002","attribute":"truthfulness","source":"locally stored submission","stimulus":"UI requests its status before server acknowledgement","environment":"server absent or not acknowledged","artifact":"submission status","response":"local-only state is returned and server-arrived state is not returned","response_measure":"binary pass: local label is exactly the Jira-defined local wording and no server-ack status is emitted","priority":"hard_constraint","evidence_refs":["EV-004"]},
+    {"id":"QS-003","attribute":"modifiability","source":"product team","stimulus":"adds a server inbox persistence implementation","environment":"Sprint 2 development","artifact":"submission use case","response":"concrete persistence is changed/wired without moving domain policy into UI","response_measure":"binary pass: domain/application architecture tests still pass and repository port remains the application dependency","priority":"minimum_requirement","evidence_refs":["EV-002","EV-003"]},
+    {"id":"QS-004","attribute":"security","source":"frontend build","stimulus":"production web bundle is produced","environment":"build/review","artifact":"client code/config","response":"no server/service secret is required by the browser persistence path","response_measure":"binary pass: no secret-valued environment variable or service-role credential is present in tracked frontend files","priority":"hard_constraint","evidence_refs":["EV-002","EV-005"]}
+  ],
+  "existing_commitments": ["Jira MCL backlog", "GitHub repository DYAI2025/MC_legends"],
+  "evidence_refs": ["EV-001","EV-002","EV-003","EV-004","EV-005","EV-006","EV-007","EV-008","EV-009","EV-010"],
+  "assumptions": [
+    {"id":"ASM-001","statement":"A Node-capable web deployment remains acceptable for the near-term web MVP.","severity":"medium","status":"accepted","owner":null,"review_trigger":"Hosting constraint or MCL-1 decision contradicts a Node server deployment."}
+  ],
+  "conflicts": [],
+  "missing_information": [
+    {"id":"MISS-001","statement":"MCL-1 product-format decision is unresolved.","severity":"high","status":"open","owner":null,"review_trigger":"MCL-1 transitions to a decided state."},
+    {"id":"MISS-002","statement":"No MCL-specific Confluence page was located through connected searches in this run.","severity":"medium","status":"open","owner":null,"review_trigger":"Canonical MCL Confluence page is identified."},
+    {"id":"MISS-003","statement":"Production hosting, authentication mechanism, retention and recovery objectives are not yet fixed in the read backlog.","severity":"medium","status":"open","owner":null,"review_trigger":"Server/production stories enter implementation."}
+  ]
+}

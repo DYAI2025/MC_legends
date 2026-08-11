@@ -1,0 +1,42 @@
+{
+  "schema_version":"1.0",
+  "id":"nextjs-node-web-foundation",
+  "version":"0.1.0",
+  "selection_status":"conditional",
+  "description":"Project adapter for a Next.js 16 modular web monolith with framework-free domain/application modules and persistence adapters.",
+  "runtime":{"name":"Node.js","version_range":">=24.18.1 <25"},
+  "framework":{"name":"Next.js","version_range":"16.2.12"},
+  "package_manager":{"name":"npm","version_range":">=11.16.0 <12"},
+  "architecture_form":"modular monolith with ports and adapters",
+  "data_store":"Browser IndexedDB for Sprint 1; server/Supabase adapters only when approved",
+  "target_platform":"Modern web browser plus Node.js server runtime",
+  "official_sources":[
+    {"title":"Next.js npm package","url":"https://www.npmjs.com/package/next","checked_at":"2026-08-11","status":"supported"},
+    {"title":"Node.js latest v24 release index","url":"https://nodejs.org/download/release/latest-v24.x/","checked_at":"2026-08-11","status":"supported"},
+    {"title":"React npm package","url":"https://www.npmjs.com/package/react","checked_at":"2026-08-11","status":"supported"},
+    {"title":"Playwright npm package","url":"https://www.npmjs.com/package/playwright","checked_at":"2026-08-11","status":"supported"}
+  ],
+  "support":{"supported":["Node.js 24 LTS line","Next.js 16.2.12 stable","React 19.2.8","browser IndexedDB","Vitest unit/architecture tests","Playwright browser smoke tests"],"unsupported":["Minecraft loader selection before MCL-1","production Supabase/auth topology not yet decided","Node 22 as the project target runtime"]},
+  "license":"Adapter metadata is project-internal. Next.js/React/ESLint are MIT; Playwright/TypeScript/fake-indexeddb use their respective upstream open-source licenses. Project source-code license remains undecided.",
+  "provenance":"Generated from current official package/runtime sources plus Jira MCL architecture drivers on 2026-08-11.",
+  "commands":{
+    "install":["npm","install"],
+    "dev":["npm","run","dev"],
+    "lint":["npm","run","lint"],
+    "typecheck":["npm","run","typecheck"],
+    "test":["npm","run","test"],
+    "build":["npm","run","build"],
+    "e2e":["npm","run","test:e2e"]
+  },
+  "expected_files":["package.json","package-lock.json","next.config.ts","tsconfig.json","eslint.config.mjs","src/app/page.tsx","src/domain/submissions/submission.ts","src/application/submissions/submission-repository.ts","src/adapters/persistence/indexeddb-submission-repository.ts","tests/architecture/boundaries.test.ts"],
+  "protected_files":[],
+  "architecture_rules":["domain imports no Next.js/React/application/adapters","application imports no concrete adapters/Next.js","delivery composes ports through composition/adapters","original submissions are immutable","server acknowledgement is explicit"],
+  "tests":["foundation structure check","architecture import tests","submission invariant unit tests","IndexedDB persistence test","Next.js build","Playwright health/page smoke"],
+  "security_policies":["no secrets in frontend/tracked files","authenticated future server listing","dependency audit before merge","minimal GitHub Actions permissions"],
+  "required_environment_variables":[],
+  "network_behavior":"requires_network",
+  "update_policy":"Dependabot proposes npm updates weekly and GitHub Actions updates monthly; major framework/runtime changes require gate re-run and ADR review when architecture semantics change.",
+  "known_incompatibilities":["The generator container currently runs Node 22.16.0, below the project-pinned Node 24 target.","Generator DNS/network access to registry.npmjs.org failed, so dependency installation and runtime verification were not possible."],
+  "deprecations":[],
+  "verification":{"checked_at":"2026-08-11","status":"not_run","tested_runtime":"Generator structural checks on Node 22.16.0; target runtime Node 24.18.1 not executable in this environment","evidence_paths":["docs/architecture/VALIDATION.md","docs/architecture/evidence-ledger.json"]}
+}

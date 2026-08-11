@@ -1,0 +1,418 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-10T23:23:00Z",
+  "subject": "MC Legends / Avaloria web foundation bootstrap",
+  "records": [
+    {
+      "id": "EV-001",
+      "claim": "Jira MCL-1 is unresolved and blocks a loader/engine commitment in this foundation.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Jira MCL-1 live connector read on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "product format / loader decision",
+      "limitations": [
+        "Issue may change after the recorded read."
+      ]
+    },
+    {
+      "id": "EV-002",
+      "claim": "Jira MCL-22 requires a thin web architecture with persistence seams and no frontend secrets.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Jira MCL-22 live connector read on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "web architecture",
+      "limitations": [
+        "Issue may change after the recorded read."
+      ]
+    },
+    {
+      "id": "EV-003",
+      "claim": "Jira MCL-33 describes a Local -> Server -> Supabase direction with persistence adapter boundaries.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Jira MCL-33 live connector read on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "data flow",
+      "limitations": [
+        "Future Supabase implementation is planned, not current runtime evidence."
+      ]
+    },
+    {
+      "id": "EV-004",
+      "claim": "Sprint-1 tickets MCL-37/MCL-38/MCL-40 require text submission, truthful local status and reload-persistent local submission storage.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Jira MCL Sprint-1 live connector read on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "Sprint 1 acceptance behavior",
+      "limitations": [
+        "Tickets were To Do at read time; these are requirements, not implemented-state claims."
+      ]
+    },
+    {
+      "id": "EV-005",
+      "claim": "Jira MCL-34 requires authenticated future inbox reads and upload safety boundaries.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Jira MCL-34 live connector read on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "future server security",
+      "limitations": [
+        "Not implemented by this foundation."
+      ]
+    },
+    {
+      "id": "EV-006",
+      "claim": "No MCL-specific Confluence page was located through the attempted connected searches.",
+      "classification": "project_internal",
+      "label": "MISSING",
+      "confidence": 4,
+      "source": "Confluence CQL/natural-language searches for Avaloria, Minecraft, Minecraft-Legends and MCL-1 on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "MCL Confluence evidence",
+      "limitations": [
+        "Search absence does not prove no page exists."
+      ]
+    },
+    {
+      "id": "EV-007",
+      "claim": "GitHub repository DYAI2025/MC_legends exists, reports default branch main, push/admin permission, and no commits/branches/PRs.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "GitHub connector preflight on 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "remote repository state",
+      "limitations": [
+        "Remote state can change after readback."
+      ]
+    },
+    {
+      "id": "EV-008",
+      "claim": "npm registry reports Next.js 16.2.12 as the latest stable tag at research time.",
+      "classification": "primary",
+      "label": "EXTERNAL_OFFICIAL_VERIFIED",
+      "confidence": 5,
+      "source": "https://www.npmjs.com/package/next?activeTab=versions",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "framework version",
+      "limitations": [
+        "Package tags can change after research time."
+      ]
+    },
+    {
+      "id": "EV-009",
+      "claim": "Node official latest-v24.x index reports Node 24.18.1 at research time.",
+      "classification": "primary",
+      "label": "EXTERNAL_OFFICIAL_VERIFIED",
+      "confidence": 5,
+      "source": "https://nodejs.org/download/release/latest-v24.x/",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "runtime version",
+      "limitations": [
+        "Latest patch can change after research time."
+      ]
+    },
+    {
+      "id": "EV-010",
+      "claim": "Project delivery uses Codex and Claude Code agents and does not require effort estimates for agent coding.",
+      "classification": "user_provided",
+      "label": "PROJECT_DECISION",
+      "confidence": 5,
+      "source": "Project conversation before this bootstrap request",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "team/delivery model",
+      "limitations": []
+    },
+    {
+      "id": "EV-011",
+      "claim": "Generator cannot resolve registry.npmjs.org; npm ping returns EAI_AGAIN and dependency installation cannot complete.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "Local generator command evidence on 2026-08-11",
+      "checked_at": "2026-08-10T23:22:34Z",
+      "scope": "adapter/build verification",
+      "limitations": [
+        "This describes the generator environment, not GitHub Actions or a developer workstation."
+      ]
+    },
+    {
+      "id": "EV-012",
+      "claim": "Current dependency versions were researched from official npm/Node sources, but their combination has not completed a clean local build in this generator.",
+      "classification": "primary",
+      "label": "EXTERNAL_OFFICIAL_VERIFIED",
+      "confidence": 4,
+      "source": "npm package pages and Node official release index checked 2026-08-11",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "dependency provenance/version research",
+      "limitations": [
+        "Combination compatibility remains conditional until install/build gates pass."
+      ]
+    },
+    {
+      "id": "EV-013",
+      "claim": "User explicitly authorized boilerplate creation and GitHub commit/push to DYAI2025/MC_legends.",
+      "classification": "user_provided",
+      "label": "PROJECT_DECISION",
+      "confidence": 5,
+      "source": "Current user request",
+      "checked_at": "2026-08-10T23:19:01Z",
+      "scope": "mutation authorization",
+      "limitations": []
+    },
+    {
+      "id": "EV-014",
+      "claim": "Creating remote work branch chore/bootstrap-web-foundation from main failed with HTTP 409 because the Git repository is empty.",
+      "classification": "project_internal",
+      "label": "BLOCKER",
+      "confidence": 5,
+      "source": "GitHub.create_branch connector response on 2026-08-11",
+      "checked_at": "2026-08-10T23:29:00Z",
+      "scope": "GitHub delivery",
+      "limitations": [
+        "The available connector requires an existing base ref/commit for branch creation."
+      ]
+    },
+    {
+      "id": "EV-015",
+      "claim": "A local root commit exists on chore/bootstrap-web-foundation with bootstrap content commit 902603416ce242b2803a0358703ffc573953f8df.",
+      "classification": "project_internal",
+      "label": "OBSERVED",
+      "confidence": 5,
+      "source": "local git rev-parse/log on 2026-08-11",
+      "checked_at": "2026-08-10T23:29:00Z",
+      "scope": "local delivery artifact",
+      "limitations": [
+        "Local commit is not a remote GitHub commit until push succeeds."
+      ]
+    }
+  ],
+  "gate_results": [
+    {
+      "id": "GATE-STRUCTURE",
+      "required": true,
+      "status": "passed",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "node",
+        "scripts/check-foundation.mjs"
+      ],
+      "cwd": ".",
+      "tool": "node",
+      "tool_version": "v22.16.0 (generator)",
+      "exit_code": 0,
+      "duration_seconds": 0.0291,
+      "stdout_log": null,
+      "stderr_log": null,
+      "report_path": "docs/architecture/VALIDATION.md",
+      "artifact_hashes": {
+        "scripts/check-foundation.mjs": "41370174b9c1d094a57420027a0d8b267e641ffbe9673ad6d4c7adc6b9a26687"
+      },
+      "reason": "Re-run passed after correcting a self-match bug in the checker."
+    },
+    {
+      "id": "GATE-SCHEMAS",
+      "required": true,
+      "status": "passed",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "python3",
+        "jsonschema validation against installed Adaptive Boilerplate schemas"
+      ],
+      "cwd": ".",
+      "tool": "python/jsonschema",
+      "tool_version": "3.13.5 / jsonschema 4.26.0",
+      "exit_code": 0,
+      "duration_seconds": 1.5041,
+      "stdout_log": null,
+      "stderr_log": null,
+      "report_path": "docs/architecture/VALIDATION.md",
+      "artifact_hashes": {
+        "project-intake.json": "6b771a6362974aeaae52509e12c8f235ae1b4f7ab5914a2c931a6160afa18e74",
+        "architecture-decision.json": "18f161f887b567ab7ddd9aba97c9ddea9bf87f51ee93b956297554c1af6c63c9",
+        "stack-adapter.json": "1928640293f1ff2f69b6e918cc3ee4976104e85d3e61af5aa82036ab8164fb65",
+        "build-manifest.json": "746b20d6fe794deb86810ce06928cd3828e1a4b1de4d2dac4d35b8a5b891418b"
+      },
+      "reason": "All four artifacts validated against the actual installed skill schemas."
+    },
+    {
+      "id": "GATE-INSTALL",
+      "required": true,
+      "status": "failed",
+      "timestamp": "2026-08-10T23:22:34Z",
+      "argv": [
+        "npm",
+        "install",
+        "--no-fund"
+      ],
+      "cwd": ".",
+      "tool": "npm",
+      "tool_version": "10.9.2 local; project target 11.x",
+      "exit_code": null,
+      "duration_seconds": 120.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "report_path": "docs/architecture/VALIDATION.md",
+      "artifact_hashes": {},
+      "reason": "Install attempt timed out with no registry response; bounded npm ping then failed EAI_AGAIN resolving registry.npmjs.org."
+    },
+    {
+      "id": "GATE-LINT",
+      "required": true,
+      "status": "not_run",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "cwd": ".",
+      "tool": "npm",
+      "tool_version": "project target 11.x",
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "Dependencies unavailable because GATE-INSTALL failed."
+    },
+    {
+      "id": "GATE-TYPECHECK",
+      "required": true,
+      "status": "not_run",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": ".",
+      "tool": "npm",
+      "tool_version": "project target 11.x",
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "Dependencies unavailable because GATE-INSTALL failed."
+    },
+    {
+      "id": "GATE-UNIT",
+      "required": true,
+      "status": "not_run",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "npm",
+        "run",
+        "test"
+      ],
+      "cwd": ".",
+      "tool": "npm",
+      "tool_version": "project target 11.x",
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "Dependencies unavailable because GATE-INSTALL failed."
+    },
+    {
+      "id": "GATE-BUILD",
+      "required": true,
+      "status": "not_run",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": ".",
+      "tool": "npm",
+      "tool_version": "project target 11.x",
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "Dependencies unavailable and target Node 24 runtime is not installed in the generator."
+    },
+    {
+      "id": "GATE-E2E",
+      "required": true,
+      "status": "not_run",
+      "timestamp": "2026-08-10T23:23:00Z",
+      "argv": [
+        "npm",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": ".",
+      "tool": "npm/playwright",
+      "tool_version": "project target Playwright 1.62.0",
+      "exit_code": null,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "Build/runtime dependencies unavailable because GATE-INSTALL failed."
+    },
+    {
+      "id": "GATE-SECRET-SCAN",
+      "required": true,
+      "status": "passed",
+      "timestamp": "2026-08-10T23:26:00Z",
+      "argv": [
+        "node",
+        "scripts/check-secrets.mjs"
+      ],
+      "cwd": ".",
+      "tool": "node",
+      "tool_version": "v22.16.0 (generator)",
+      "exit_code": 0,
+      "duration_seconds": 0.1,
+      "stdout_log": null,
+      "stderr_log": null,
+      "report_path": "docs/architecture/VALIDATION.md",
+      "artifact_hashes": {
+        "scripts/check-secrets.mjs": "6cc741e02bb2f05c61fd61950ef107768350447baa37db975b81ba67c72d54b3"
+      },
+      "reason": "Deterministic tracked-text scan found no common credential/private-key signatures."
+    },
+    {
+      "id": "GATE-GITHUB",
+      "required": true,
+      "status": "failed",
+      "timestamp": "2026-08-10T23:29:00Z",
+      "argv": [
+        "GitHub.create_branch",
+        "chore/bootstrap-web-foundation",
+        "base=main"
+      ],
+      "cwd": "remote DYAI2025/MC_legends",
+      "tool": "GitHub connector",
+      "tool_version": "connected app",
+      "exit_code": 409,
+      "duration_seconds": 0.0,
+      "stdout_log": null,
+      "stderr_log": null,
+      "artifact_hashes": {},
+      "reason": "GitHub.create_branch returned 409 Git Repository is empty; no safe non-default branch can be created from main until a root commit exists."
+    }
+  ],
+  "overall_status": "failed",
+  "runner": {
+    "environment": "OpenAI generator container",
+    "node": "v22.16.0",
+    "npm": "10.9.2",
+    "python": "3.13.5",
+    "git": "git version 2.47.3"
+  }
+}
