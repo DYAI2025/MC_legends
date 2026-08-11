@@ -11,3 +11,9 @@ export const childStatusMeta: ReadonlyArray<{
   { id: "open", label: "Noch offen", explanation: "Das ist noch nicht entschieden.", icon: "?" },
   { id: "tryout", label: "Zum Ausprobieren", explanation: "Das können wir gemeinsam testen.", icon: "➜" },
 ];
+
+export const currentQuestion = {
+  id: "river-color",
+  title: "Welche Farbe soll der Fluss haben?",
+  prompt: "Wie sieht der Fluss in deiner Fantasie aus? Schreib uns deine Idee.",
+} as const;
