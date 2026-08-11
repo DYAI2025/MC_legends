@@ -7,8 +7,10 @@ import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import {
   avaloriaIdeas,
   childCategories,
+  childStatusFor,
   childStatusMeta,
   currentQuestion,
+  internalCategoryLabel,
   type ChildCategory,
   type ChildStatus,
 } from "@/content/avaloria-content";
@@ -140,18 +142,18 @@ export default function HomePage() {
         </div>
         <div className="idea-grid">
           {visibleIdeas.map((idea) => {
-            const status = statusFor(idea.status);
+            const status = statusFor(childStatusFor(idea.truthStatus));
             return (
               <article className="idea-card" key={idea.id}>
                 <div className="idea-card-topline">
-                  <span className={`idea-status status-${idea.status}`}>
+                  <span className={`idea-status status-${childStatusFor(idea.truthStatus)}`}>
                     <span aria-hidden="true">{status.icon}</span> {status.label}
                   </span>
                   <span className="idea-category">{idea.childCategory}</span>
                 </div>
                 <h3>{idea.title}</h3>
                 <p>{idea.summary}</p>
-                <span className="idea-owner">Thema: {idea.internalCategory === "prologue" ? "Anfang der Geschichte" : idea.internalCategory === "main-story" ? "Hauptgeschichte" : "Weltidee"}</span>
+                <span className="idea-owner">Thema: {internalCategoryLabel(idea.internalCategory)}</span>
               </article>
             );
           })}
