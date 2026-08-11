@@ -120,6 +120,7 @@ export default function HomePage() {
         <div className="category-row" aria-label="Themen auswählen">
           <button
             className={`category-chip ${selectedCategory === "Alle Ideen" ? "is-selected" : ""}`}
+            aria-pressed={selectedCategory === "Alle Ideen"}
             onClick={() => setSelectedCategory("Alle Ideen")}
             type="button"
           >
@@ -128,6 +129,7 @@ export default function HomePage() {
           {childCategories.map((category) => (
             <button
               className={`category-chip ${selectedCategory === category.label ? "is-selected" : ""}`}
+              aria-pressed={selectedCategory === category.label}
               key={category.label}
               onClick={() => setSelectedCategory(category.label)}
               type="button"
