@@ -78,12 +78,11 @@ describe("avaloria content", () => {
 
   it("maps every entry onto one of the accepted child groups and child states", () => {
     const groups = childCategories.map((category) => category.label);
-    const states = childStatusLegend.map((status) => status.id);
     expect(groups.length).toBe(6);
 
     for (const idea of avaloriaIdeas) {
       expect(groups).toContain(idea.childCategory);
-      expect(states).toContain(childStatusFor(idea.truthStatus));
+      expect(allChildStatuses).toContain(childStatusFor(idea.truthStatus));
     }
   });
 
@@ -117,13 +116,26 @@ describe("truth status to child status mapping", () => {
   it("has a presentation for every child status, with no shared identity", () => {
     const labels = childStatusLegend.map((status) => status.label);
     expect(new Set(labels).size).toBe(childStatusLegend.length);
-    expect(childStatusLegend.map((status) => status.id)).toEqual(allChildStatuses);
     for (const status of childStatusLegend) {
       expect(childStatusPresentationFor(status.id)).toBe(status);
       expect(status.label.trim()).not.toBe("");
       expect(status.explanation.trim()).not.toBe("");
       expect(status.icon.trim()).not.toBe("");
     }
+  });
+
+  /**
+   * Pinned against literals on purpose: childStatusLegend and allChildStatuses are both
+   * derived from childStatusPresentations, so comparing them to each other would pass
+   * under any permutation of that record and silently reorder the child's status cards.
+   */
+  it("shows the legend in the intended reading order", () => {
+    expect(childStatusLegend.map((status) => status.id)).toEqual([
+      "in-world",
+      "idea",
+      "open",
+      "tryout",
+    ]);
   });
 });
 
