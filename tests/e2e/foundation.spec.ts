@@ -1,9 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const heroHeading = "Deine Ideen machen Avaloria größer.";
 const openQuestionHeading = "Welche Farbe soll der Fluss haben?";
 
-function heroRegion(page: import("@playwright/test").Page) {
+function heroRegion(page: Page) {
   return page.getByRole("region", { name: heroHeading });
 }
 
