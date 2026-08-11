@@ -13,3 +13,11 @@ test("health endpoint reports ok", async ({ request }) => {
   expect(response.ok()).toBeTruthy();
   await expect(response.json()).resolves.toEqual({ status: "ok" });
 });
+
+test("status cards explain the four child-facing states", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".status-card")).toHaveCount(4);
+  await expect(page.getByText("Noch offen", { exact: true })).toBeVisible();
+  await expect(page.getByText("Das ist noch nicht entschieden.", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Canon");
+});
