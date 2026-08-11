@@ -36,3 +36,12 @@ test("the open question uses simple language and a disabled empty answer", async
   await expect(page.getByRole("button", { name: "Antwort speichern" })).toBeDisabled();
   await expect(page.locator("body")).not.toContainText("Divergenzphase");
 });
+
+test("the child view keeps six easy-to-understand idea groups", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".category-chip")).toHaveCount(7);
+  await page.getByRole("button", { name: "Geschichte & Welt" }).click();
+  await expect(page.getByRole("heading", { name: "Das Tor ins grüne Tal" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Die Lichter von Avaloria" })).toBeVisible();
+  await expect(page.locator(".idea-card")).toHaveCount(2);
+});
