@@ -28,9 +28,25 @@ h1 { font-size: clamp(2.7rem, 5.5vw, 5.3rem); letter-spacing: -.075em; line-heig
 .visual-caption { align-items: center; background: var(--ink); border-radius: 10px; bottom: -17px; color: #fffdf7; display: flex; font-size: .82rem; font-weight: 800; gap: 8px; left: 24px; padding: 11px 14px; position: absolute; z-index: 2; }
 .visual-caption span { color: #f2c96b; }
 
+.status-section { border-top: 1px solid var(--line); margin: 0 auto; max-width: 1176px; padding: 70px 32px 90px; }
+.section-heading { align-items: end; display: flex; gap: 32px; justify-content: space-between; margin-bottom: 28px; }
+.section-kicker { color: #4c8d67; font-size: .75rem; font-weight: 900; letter-spacing: .15em; margin: 0 0 16px; text-transform: uppercase; }
+h2 { font-size: clamp(1.7rem, 3vw, 2.7rem); letter-spacing: -.05em; line-height: 1.05; margin: 0; max-width: 600px; }
+.section-support { color: var(--muted); font-size: .9rem; line-height: 1.5; margin: 0; max-width: 270px; }
+.status-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); }
+.status-card { align-items: flex-start; border: 1px solid var(--line); border-radius: 17px; display: flex; gap: 13px; min-height: 134px; padding: 19px; }
+.status-icon { align-items: center; background: #fff; border-radius: 10px; display: inline-flex; flex: 0 0 35px; font-size: 1.2rem; height: 35px; justify-content: center; }
+.status-card h3 { font-size: .98rem; margin: 2px 0 7px; }
+.status-card p { color: var(--muted); font-size: .8rem; line-height: 1.45; margin: 0; }
+.status-in-world { background: #e5f3d7; }.status-in-world .status-icon { color: #4f944e; }
+.status-idea { background: #fff1c7; }.status-idea .status-icon { color: #c28b23; }
+.status-open { background: #e0f1f5; }.status-open .status-icon { color: #347f92; }
+.status-tryout { background: #eee4f7; }.status-tryout .status-icon { color: #80549d; }
+
 @media (max-width: 900px) {
   .hero { gap: 38px; grid-template-columns: 1fr 1fr; min-height: auto; padding-top: 35px; }
   .hero-art { transform: rotate(1deg); }
+  .status-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 680px) {
@@ -38,4 +54,8 @@ h1 { font-size: clamp(2.7rem, 5.5vw, 5.3rem); letter-spacing: -.075em; line-heig
   .hero-copy, .hero-visual { width: 100%; }
   h1 { font-size: clamp(2.7rem, 14vw, 4.2rem); }
   .hero-visual { margin-top: 20px; }
+  .status-section { padding: 58px 16px 76px; }
+  .section-heading { align-items: flex-start; flex-direction: column; gap: 13px; }
+  .section-support { max-width: 100%; }
+  .status-grid { grid-template-columns: 1fr; }
 }
