@@ -1,8 +1,13 @@
 version: 2
 updates:
-  # Version updates are paused during the delivery-stabilisation phase.
-  # `open-pull-requests-limit: 0` stops scheduled version-update PRs.
-  # Dependabot SECURITY updates are a separate repository setting and stay ON.
+  # Version updates are paused during the delivery-stabilisation phase (MCL-44).
+  # `open-pull-requests-limit: 0` stops scheduled version-update PRs; it does not
+  # affect security updates, which are repository settings rather than config here.
+  # Current repository state, checked 2026-08-11:
+  #   - Dependabot alerts: ENABLED (visibility, raises no pull requests)
+  #   - Dependabot automated security fixes: DISABLED (this is what opens PRs)
+  # Compensating control: CI runs `npm audit --audit-level=high` on every run,
+  # so a high-severity advisory fails the pipeline even with no Dependabot PRs.
   - package-ecosystem: npm
     directory: "/"
     schedule:
