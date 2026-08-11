@@ -1,8 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+const heroHeading = "Deine Ideen machen Avaloria größer.";
+const openQuestionHeading = "Welche Farbe soll der Fluss haben?";
+
+function heroRegion(page: import("@playwright/test").Page) {
+  return page.getByRole("region", { name: heroHeading });
+}
+
 test("Avaloria page is available without forbidden franchise references", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Willkommen in Avaloria." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: heroHeading })).toBeVisible();
   const text = (await page.locator("body").innerText()).toLowerCase();
   expect(text).not.toContain("harry potter");
   expect(text).not.toContain("hogwarts");
@@ -24,14 +31,15 @@ test("status cards explain the four child-facing states", async ({ page }) => {
 
 test("hero has two clear primary actions", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".hero-actions .button")).toHaveCount(2);
-  await expect(page.getByRole("link", { name: /Idee teilen/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Frage beantworten/ })).toBeVisible();
+  const hero = heroRegion(page);
+  await expect(hero.getByRole("link")).toHaveCount(2);
+  await expect(hero.getByRole("link", { name: /Idee teilen/ })).toBeVisible();
+  await expect(hero.getByRole("link", { name: /Frage beantworten/ })).toBeVisible();
 });
 
 test("the open question uses simple language and a disabled empty answer", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Welche Farbe soll der Fluss haben?" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: openQuestionHeading })).toBeVisible();
   await expect(page.getByLabel("Deine Antwort")).toBeVisible();
   await expect(page.getByRole("button", { name: "Antwort speichern" })).toBeDisabled();
   await expect(page.locator("body")).not.toContainText("Divergenzphase");
@@ -40,7 +48,11 @@ test("the open question uses simple language and a disabled empty answer", async
 test("the child view keeps six easy-to-understand idea groups", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".category-chip")).toHaveCount(7);
-  await page.getByRole("button", { name: "Geschichte & Welt" }).click();
+
+  const historyChip = page.getByRole("button", { name: "Geschichte & Welt", pressed: false });
+  await historyChip.click();
+  await expect(page.getByRole("button", { name: "Geschichte & Welt", pressed: true })).toBeVisible();
+
   await expect(page.getByRole("heading", { name: "Das Tor ins grüne Tal" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Die Lichter von Avaloria" })).toBeVisible();
   await expect(page.locator(".idea-card")).toHaveCount(2);
