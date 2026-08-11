@@ -1,8 +1,18 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { deliverSubmission } from "@/application/submissions/deliver-submission";
 import { submitText } from "@/application/submissions/submit-text";
-import { createBrowserSubmissionRepository } from "@/composition/browser";
+import {
+  createBrowserSubmissionInbox,
+  createBrowserSubmissionRepository,
+} from "@/composition/browser";
+import {
+  hasArrivedInProject,
+  submissionStatusLabel,
+  type TextSubmission,
+} from "@/domain/submissions/submission";
+import { childMessageFor } from "@/app/child-submission-message";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import {
   avaloriaIdeas,
@@ -18,6 +28,7 @@ import {
 import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
 
 const repository = createBrowserSubmissionRepository();
+const inbox = createBrowserSubmissionInbox();
 const question = focusQuestion();
 const upcomingQuestions = otherOpenQuestions();
 
@@ -26,6 +37,8 @@ export default function HomePage() {
   const [answer, setAnswer] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [submissions, setSubmissions] = useState<readonly TextSubmission[]>([]);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const visibleIdeas = useMemo(
     () =>
       selectedCategory === "Alle Ideen"
@@ -34,6 +47,21 @@ export default function HomePage() {
     [selectedCategory],
   );
 
+  const refreshSubmissions = useCallback(
+    () =>
+      repository.list().then(
+        (stored) => setSubmissions(stored),
+        // A failed local read must never break the page for a child. An empty list is
+        // the only honest thing to show: this device cannot say what it holds.
+        () => setSubmissions([]),
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    void refreshSubmissions();
+  }, [refreshSubmissions]);
+
   async function handleAnswerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (answer.trim().length === 0 || isSaving) return;
@@ -41,17 +69,35 @@ export default function HomePage() {
     setIsSaving(true);
     setSavedMessage(null);
     try {
-      await submitText(
+      const saved = await submitText(
         { questionId: question.id, originalText: answer },
         repository,
         { createId: () => crypto.randomUUID(), now: () => new Date() },
       );
-      setSavedMessage("Deine Antwort ist nur auf diesem Gerät gespeichert.");
       setAnswer("");
+      setSavedMessage("Deine Antwort ist gespeichert.");
+
+      // Only the outcome of a real delivery attempt may change that sentence.
+      setSavedMessage(childMessageFor(await deliverSubmission(saved, repository, inbox)));
     } catch {
       setSavedMessage("Das hat noch nicht geklappt. Versuch es bitte noch einmal.");
     } finally {
       setIsSaving(false);
+      await refreshSubmissions();
+    }
+  }
+
+  async function handleRetry(submission: TextSubmission) {
+    // One attempt at a time, so a second click cannot race the first and overwrite
+    // its message with an older outcome.
+    if (retryingId !== null) return;
+
+    setRetryingId(submission.id);
+    try {
+      setSavedMessage(childMessageFor(await deliverSubmission(submission, repository, inbox)));
+    } finally {
+      setRetryingId(null);
+      await refreshSubmissions();
     }
   }
 
@@ -65,6 +111,7 @@ export default function HomePage() {
         <div className="topbar-links">
           <a href="#ideen">Ideen ansehen</a>
           <a href="#frage">Frage beantworten</a>
+          <a href="#meine-ideen">Meine Ideen</a>
         </div>
         <a className="profile-button" href="#frage">Mein Bereich</a>
       </nav>
@@ -194,6 +241,46 @@ export default function HomePage() {
             ))}
           </ul>
         </div>
+      </section>
+
+      <section className="my-ideas-section content-width" id="meine-ideen" aria-labelledby="my-ideas-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Meine Ideen</p>
+            <h2 id="my-ideas-heading">Das hast du schon geschickt.</h2>
+          </div>
+          <p className="section-support">Hier siehst du, wo jede Antwort gerade ist.</p>
+        </div>
+        {submissions.length === 0 ? (
+          <p className="my-ideas-empty">Noch keine Antwort. Deine erste Idee kommt hier hin.</p>
+        ) : (
+          <ul className="my-ideas-list">
+            {submissions.map((submission) => {
+              // The one rule this whole slice exists for: the arrived wording comes
+              // from the stored status, which only a real receipt can produce.
+              const arrived = hasArrivedInProject(submission.status);
+              return (
+                <li className="my-idea" key={submission.id}>
+                  <p className="my-idea-text">{submission.originalText}</p>
+                  <p className={`my-idea-status status-${arrived ? "in-world" : "open"}`}>
+                    <span aria-hidden="true">{arrived ? "✦" : "▣"}</span>{" "}
+                    {submissionStatusLabel(submission.status)}
+                  </p>
+                  {arrived ? null : (
+                    <button
+                      className="button button-secondary"
+                      disabled={retryingId !== null}
+                      onClick={() => void handleRetry(submission)}
+                      type="button"
+                    >
+                      {retryingId === submission.id ? "Wird gesendet …" : "Noch einmal senden"}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <footer className="footer content-width">

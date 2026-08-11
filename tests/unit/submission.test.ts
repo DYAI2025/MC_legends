@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   acknowledgeSubmission,
   createTextSubmission,
+  hasArrivedInProject,
   submissionStatusLabel,
 } from "@/domain/submissions/submission";
 
@@ -94,6 +95,35 @@ describe("acknowledgeSubmission", () => {
   });
 
   it("maps the acknowledged status to the exact child-facing wording", () => {
+    expect(submissionStatusLabel("SERVER_ACKNOWLEDGED")).toBe("Im Projekt angekommen");
+  });
+});
+
+/**
+ * The child view has to branch on arrival - one status gets the arrived wording, the
+ * other gets a retry button. Only this module may name the acknowledged status
+ * literal (tests/architecture/boundaries.test.ts), so the branch itself lives here
+ * instead of being re-derived from a string comparison in the UI.
+ */
+describe("hasArrivedInProject", () => {
+  it("is true only for a status the domain produced from a real receipt", () => {
+    const submission = createTextSubmission(
+      { questionId: "companion-animal", originalText: "Mein Tier ist ein Steinwolf." },
+      dependencies,
+    );
+    const acknowledged = acknowledgeSubmission(submission, {
+      receiptId: "receipt-001",
+      receivedAt: "2026-08-11T10:00:00.000Z",
+    });
+
+    expect(hasArrivedInProject(submission.status)).toBe(false);
+    expect(hasArrivedInProject(acknowledged.status)).toBe(true);
+  });
+
+  it("agrees with the child-facing wording for every status", () => {
+    expect(hasArrivedInProject("LOCAL_ONLY")).toBe(false);
+    expect(submissionStatusLabel("LOCAL_ONLY")).toBe("Nur auf diesem Gerät gespeichert");
+    expect(hasArrivedInProject("SERVER_ACKNOWLEDGED")).toBe(true);
     expect(submissionStatusLabel("SERVER_ACKNOWLEDGED")).toBe("Im Projekt angekommen");
   });
 });

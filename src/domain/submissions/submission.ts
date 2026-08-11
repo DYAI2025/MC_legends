@@ -86,6 +86,21 @@ export function acknowledgeSubmission(
   });
 }
 
+/**
+ * Whether the project itself confirmed it holds this submission. The child view has
+ * to branch on that - arrived wording versus a retry button - and only this module is
+ * allowed to name the acknowledged status, so the branch is answered here rather than
+ * by a string comparison somewhere in the UI.
+ */
+export function hasArrivedInProject(status: SubmissionStatus): boolean {
+  switch (status) {
+    case "LOCAL_ONLY":
+      return false;
+    case "SERVER_ACKNOWLEDGED":
+      return true;
+  }
+}
+
 export function submissionStatusLabel(status: SubmissionStatus): string {
   switch (status) {
     case "LOCAL_ONLY":
