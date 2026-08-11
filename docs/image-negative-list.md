@@ -7,12 +7,12 @@ eigene Bildsprache von Avaloria und hält den Header klar von bekannten Fantasy-
 
 ## Nicht verwenden
 
-- Eule, besonders eine Eule mit einer Nachricht
-- Brief, Schriftrolle oder Umschlag als zentrales Bildelement
-- Wachssiegel oder Siegelstempel
-- Magieschule oder ein Schulgebäude als Hauptmotiv
-- Schulwappen, Schulwappen-Schild oder Schuluniform
-- Motive, Bildaufbau oder Symbole aus Film-Franchises
+- Eule (owl), besonders eine Eule mit einer Nachricht
+- Brief (letter), Schriftrolle oder Umschlag als zentrales Bildelement
+- Wachssiegel (wax seal) oder Siegelstempel
+- Magieschule (magic school) oder ein Schulgebäude als Hauptmotiv
+- Schulwappen (school crest), Schulwappen-Schild oder Schuluniform
+- Motive, Bildaufbau oder Symbole aus Film-Franchises (film franchise motifs)
 
 ## Erlaubte Richtung für MCL-23
 
