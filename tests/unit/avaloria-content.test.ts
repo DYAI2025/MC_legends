@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { avaloriaIdeas, childCategories } from "@/content/avaloria-content";
 import {
-  avaloriaIdeas,
-  childCategories,
+  allChildStatuses,
+  allInternalCategories,
   childStatusFor,
   childStatusLegend,
-  childStatusMetaFor,
-} from "@/content/avaloria-content";
-import {
-  allInternalCategories,
+  childStatusPresentationFor,
   childTopicLabelFor,
   childUnsafeVocabulary,
 } from "@/content/content-source";
@@ -119,8 +117,9 @@ describe("truth status to child status mapping", () => {
   it("has a presentation for every child status, with no shared identity", () => {
     const labels = childStatusLegend.map((status) => status.label);
     expect(new Set(labels).size).toBe(childStatusLegend.length);
+    expect(childStatusLegend.map((status) => status.id)).toEqual(allChildStatuses);
     for (const status of childStatusLegend) {
-      expect(childStatusMetaFor(status.id)).toBe(status);
+      expect(childStatusPresentationFor(status.id)).toBe(status);
       expect(status.label.trim()).not.toBe("");
       expect(status.explanation.trim()).not.toBe("");
       expect(status.icon.trim()).not.toBe("");

@@ -6,8 +6,6 @@ import {
   type TruthStatus,
 } from "./content-source";
 
-export type ChildStatus = "in-world" | "idea" | "open" | "tryout";
-
 export type ChildCategory =
   | "Geschichte & Welt"
   | "Wesen & Figuren"
@@ -25,56 +23,6 @@ export type AvaloriaIdea = Readonly<{
   internalCategory: InternalCategory;
   source: SourceReference;
 }>;
-
-export type ChildStatusPresentation = Readonly<{
-  id: ChildStatus;
-  label: string;
-  explanation: string;
-  icon: string;
-}>;
-
-/**
- * Total lookup: a child status without a presentation is a compile error. There is
- * deliberately no fallback entry - defaulting an unknown status to "Schon dabei"
- * would tell a child that an undecided idea is already part of Avaloria.
- */
-const childStatusPresentations = {
-  "in-world": { id: "in-world", label: "Schon dabei", explanation: "Das gehört schon zu Avaloria.", icon: "✦" },
-  idea: { id: "idea", label: "Eine Idee", explanation: "Das könnte später in Avaloria sein.", icon: "✎" },
-  open: { id: "open", label: "Noch offen", explanation: "Das ist noch nicht entschieden.", icon: "?" },
-  tryout: { id: "tryout", label: "Zum Ausprobieren", explanation: "Das können wir gemeinsam testen.", icon: "➜" },
-} as const satisfies Record<ChildStatus, ChildStatusPresentation>;
-
-export function childStatusMetaFor(status: ChildStatus): ChildStatusPresentation {
-  return childStatusPresentations[status];
-}
-
-/** Reading order of the four status cards in the child-facing legend. */
-export const childStatusLegend = [
-  childStatusPresentations["in-world"],
-  childStatusPresentations.idea,
-  childStatusPresentations.open,
-  childStatusPresentations.tryout,
-] as const satisfies ReadonlyArray<ChildStatusPresentation>;
-
-/**
- * The child view never shows the internal truth vocabulary. AMBIGUOUS and CONFLICT
- * both read as "noch offen" for a child: the project has not decided yet.
- * Only STATED may ever map to "in-world" - see the pinned mapping table in
- * tests/unit/avaloria-content.test.ts.
- */
-export function childStatusFor(truthStatus: TruthStatus): ChildStatus {
-  switch (truthStatus) {
-    case "STATED":
-      return "in-world";
-    case "TENTATIVE":
-      return "idea";
-    case "AMBIGUOUS":
-    case "CONFLICT":
-    case "OPEN":
-      return "open";
-  }
-}
 
 export const childCategories = [
   { label: "Geschichte & Welt", icon: "✦", description: "Orte, Reisen und die große Geschichte" },

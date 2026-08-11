@@ -7,13 +7,15 @@ import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import {
   avaloriaIdeas,
   childCategories,
-  childStatusFor,
-  childStatusLegend,
-  childStatusMetaFor,
   currentQuestion,
   type ChildCategory,
 } from "@/content/avaloria-content";
-import { childTopicLabelFor } from "@/content/content-source";
+import {
+  childStatusFor,
+  childStatusLegend,
+  childStatusPresentationFor,
+  childTopicLabelFor,
+} from "@/content/content-source";
 
 const repository = createBrowserSubmissionRepository();
 
@@ -138,7 +140,7 @@ export default function HomePage() {
         </div>
         <div className="idea-grid">
           {visibleIdeas.map((idea) => {
-            const status = childStatusMetaFor(childStatusFor(idea.truthStatus));
+            const status = childStatusPresentationFor(childStatusFor(idea.truthStatus));
             return (
               <article className="idea-card" key={idea.id}>
                 <div className="idea-card-topline">

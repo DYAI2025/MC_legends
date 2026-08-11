@@ -36,6 +36,62 @@ export function jiraSource(key: JiraIssueKey, note: string): SourceReference {
 }
 
 /**
+ * The four states a child is ever shown. Shared by every content dataset in this
+ * folder so no dataset has to import the child vocabulary from a sibling dataset.
+ */
+export type ChildStatus = "in-world" | "idea" | "open" | "tryout";
+
+export type ChildStatusPresentation = Readonly<{
+  id: ChildStatus;
+  label: string;
+  explanation: string;
+  icon: string;
+}>;
+
+/**
+ * Total lookup: a child status without a presentation is a compile error. There is
+ * deliberately no fallback entry - defaulting an unknown status to "Schon dabei"
+ * would tell a child that an undecided idea is already part of Avaloria.
+ * Key order is the reading order of the child-facing legend.
+ */
+const childStatusPresentations = {
+  "in-world": { id: "in-world", label: "Schon dabei", explanation: "Das gehört schon zu Avaloria.", icon: "✦" },
+  idea: { id: "idea", label: "Eine Idee", explanation: "Das könnte später in Avaloria sein.", icon: "✎" },
+  open: { id: "open", label: "Noch offen", explanation: "Das ist noch nicht entschieden.", icon: "?" },
+  tryout: { id: "tryout", label: "Zum Ausprobieren", explanation: "Das können wir gemeinsam testen.", icon: "➜" },
+} as const satisfies Record<ChildStatus, ChildStatusPresentation>;
+
+export function childStatusPresentationFor(status: ChildStatus): ChildStatusPresentation {
+  return childStatusPresentations[status];
+}
+
+/** Derived from the presentation table, so it can never fall out of sync with ChildStatus. */
+export const allChildStatuses = Object.keys(childStatusPresentations) as ReadonlyArray<ChildStatus>;
+
+/** The four status cards of the child-facing legend, in reading order. */
+export const childStatusLegend: ReadonlyArray<ChildStatusPresentation> =
+  Object.values(childStatusPresentations);
+
+/**
+ * The child view never shows the internal truth vocabulary. AMBIGUOUS and CONFLICT
+ * both read as "noch offen" for a child: the project has not decided yet.
+ * Only STATED may ever map to "in-world" - see the pinned mapping table in
+ * tests/unit/avaloria-content.test.ts.
+ */
+export function childStatusFor(truthStatus: TruthStatus): ChildStatus {
+  switch (truthStatus) {
+    case "STATED":
+      return "in-world";
+    case "TENTATIVE":
+      return "idea";
+    case "AMBIGUOUS":
+    case "CONFLICT":
+    case "OPEN":
+      return "open";
+  }
+}
+
+/**
  * Internal owner taxonomy shared by every content dataset in this folder.
  * Stays finer-grained than the child view on purpose: MCL-19/MCL-29 require the
  * simplified child grouping to lose no owner information.
