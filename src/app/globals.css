@@ -88,8 +88,19 @@ label { display: block; font-size: .82rem; font-weight: 900; margin-bottom: 8px;
 textarea { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); display: block; line-height: 1.5; min-height: 116px; padding: 13px; resize: vertical; width: 100%; }
 textarea::placeholder { color: #9aa69c; }
 .form-footer { align-items: center; display: flex; flex-wrap: wrap; gap: 16px; margin-top: 13px; }
-.local-note { color: #6c7c6b; font-size: .74rem; font-weight: 800; }
 .form-message { color: #4a824a; font-size: .82rem; font-weight: 800; margin: 14px 0 0; }
+.upcoming-questions { margin-top: 24px; }
+.upcoming-questions h3 { font-size: 1rem; margin-bottom: 8px; }
+.upcoming-questions ul { color: var(--muted); display: grid; gap: 6px; list-style: none; padding: 0; }
+.my-ideas-section { border-top: 1px solid var(--line); padding-bottom: 88px; padding-top: 62px; }
+.my-ideas-empty { color: var(--muted); font-size: .9rem; line-height: 1.5; margin: 0; }
+.my-ideas-list { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.my-idea { background: #fff; border: 1px solid var(--line); border-radius: 18px; display: grid; gap: 10px; justify-items: start; padding: 18px 20px; }
+.my-idea-text { line-height: 1.5; margin: 0; white-space: pre-wrap; }
+.my-idea-status { border-radius: 999px; display: inline-block; font-size: .78rem; font-weight: 900; margin: 0; padding: 6px 12px; }
+.my-idea-arrived { background: var(--ink); border: 1px solid var(--ink); color: #fffdf7; }
+.my-idea-local { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+.my-idea-message { color: var(--muted); font-size: .82rem; line-height: 1.5; margin: 0; }
 .footer { border-top: 1px solid var(--line); color: var(--muted); display: flex; font-size: .75rem; font-weight: 700; justify-content: space-between; padding: 22px 0 34px; }
 
 @media (max-width: 900px) {
@@ -118,6 +129,7 @@ textarea::placeholder { color: #9aa69c; }
   .answer-section { padding-bottom: 76px; }
   .question-card { grid-template-columns: 1fr; gap: 20px; padding: 24px; }
   .question-art { height: 68px; width: 68px; font-size: 2.7rem; }
+  .my-ideas-section { padding-bottom: 76px; padding-top: 48px; }
   .footer { flex-direction: column; gap: 8px; }
 }
 
