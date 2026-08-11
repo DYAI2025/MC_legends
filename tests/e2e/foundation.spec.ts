@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("foundation page is available without forbidden franchise references", async ({ page }) => {
+test("Avaloria page is available without forbidden franchise references", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Hier entsteht eure Welt." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Willkommen in Avaloria." })).toBeVisible();
   const text = (await page.locator("body").innerText()).toLowerCase();
   expect(text).not.toContain("harry potter");
   expect(text).not.toContain("hogwarts");
