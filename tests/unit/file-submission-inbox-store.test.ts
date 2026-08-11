@@ -9,6 +9,7 @@ const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 
 function record(overrides: Partial<InboxRecord> = {}): InboxRecord {
   return {
+    kind: "text",
     receiptId: "receipt-001",
     receivedAt: "2026-08-11T10:00:00.000Z",
     submissionId: "sub-001",

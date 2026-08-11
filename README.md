@@ -45,6 +45,14 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AVALORIA_INBOX_DIR` | `.data/inbox` | Directory the server inbox appends `submissions.jsonl` to. A blank value falls back to the default. |
+
+`AVALORIA_INBOX_DIR` is the only environment variable this app reads. On a platform with an ephemeral filesystem (Railway) the default directory does not survive a redeploy — the acknowledgement is real, the stored copy is not durable. Point the variable at a mounted volume, or accept that the inbox is per-deploy until the authenticated read side lands.
+
 ### Lockfile gate
 
 This generated foundation currently has no `package-lock.json` because the execution environment could not reach the npm registry during generation.

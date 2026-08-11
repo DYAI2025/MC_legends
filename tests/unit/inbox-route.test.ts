@@ -46,6 +46,25 @@ function validPayload(overrides: Record<string, unknown> = {}): string {
   });
 }
 
+/**
+ * Filesystem errors, host paths and stack frames - anything a refusal could carry out
+ * of the server and into a child's browser.
+ */
+const INTERNAL_DETAIL = /ENOTDIR|ENOENT|EACCES|node:|\/private\/|\/var\/folders\/|at Object|at async|Error:|stack/iu;
+
+/**
+ * Pins a refusal end to end. The leak check runs over the raw bytes the route actually
+ * sent, before anything fixes the shape: run after a toEqual has already pinned the
+ * body, its input is a constant and it cannot fail no matter what the route leaks.
+ */
+async function expectRefusal(response: Response, status: number, error: string): Promise<void> {
+  expect(response.status).toBe(status);
+
+  const raw = await response.text();
+  expect(raw, "a refusal must carry no internal detail").not.toMatch(INTERNAL_DETAIL);
+  expect(JSON.parse(raw)).toEqual({ acknowledged: false, error });
+}
+
 async function inboxLines(inboxDirectory = directory): Promise<InboxRecord[]> {
   const content = await readFile(join(inboxDirectory, INBOX_FILE), "utf8");
   return content
@@ -89,6 +108,7 @@ describe("POST /api/inbox/submissions", () => {
     const records = await inboxLines();
     expect(records).toHaveLength(1);
     expect(records[0]).toEqual({
+      kind: "text",
       receiptId: body.receiptId,
       receivedAt: body.receivedAt,
       submissionId: "sub-001",
@@ -122,8 +142,7 @@ describe("POST /api/inbox/submissions", () => {
 
     const response = await POST(request);
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     // The point of the guard: the body was never consumed, so its size never
     // mattered to this instance's memory.
     expect(request.bodyUsed).toBe(false);
@@ -149,48 +168,42 @@ describe("POST /api/inbox/submissions", () => {
       }),
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
   it("rejects a body that is not declared as JSON", async () => {
     const response = await POST(postRequest(validPayload(), { "content-type": "text/plain" }));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
   it("rejects a createdAt that is not a real instant", async () => {
     const response = await POST(postRequest(validPayload({ createdAt: "hello" })));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
   it("rejects a whitespace-only answer without acknowledging it", async () => {
     const response = await POST(postRequest(validPayload({ originalText: "   " })));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
   it("rejects a malformed request body without acknowledging it", async () => {
     const response = await POST(postRequest("{ this is not json"));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
   it("rejects an oversized answer without acknowledging it", async () => {
     const response = await POST(postRequest(validPayload({ originalText: "a".repeat(4001) })));
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ acknowledged: false, error: "invalid-payload" });
+    await expectRefusal(response, 400, "invalid-payload");
     await expect(inboxLines()).rejects.toThrow();
   });
 
@@ -215,11 +228,7 @@ describe("POST /api/inbox/submissions", () => {
 
     const response = await POST(postRequest(validPayload()));
 
-    expect(response.status).toBe(503);
-
-    const body = await response.json();
-    expect(body).toEqual({ acknowledged: false, error: "inbox-unavailable" });
-    expect(JSON.stringify(body)).not.toMatch(/ENOTDIR|node:|\/private\/|at Object|Error:/);
+    await expectRefusal(response, 503, "inbox-unavailable");
   });
 
   it("exposes no read or mutation method beyond POST", () => {

@@ -20,6 +20,7 @@ const required = [
   "src/adapters/persistence/indexeddb-submission-repository.ts",
   "src/adapters/persistence/file-submission-inbox-store.ts",
   "src/adapters/http/http-submission-inbox.ts",
+  "src/composition/browser.ts",
   "src/composition/server.ts",
   "src/app/api/inbox/submissions/route.ts",
   "scripts/check-secrets.mjs",

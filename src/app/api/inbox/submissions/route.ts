@@ -172,8 +172,11 @@ export async function POST(request: Request): Promise<Response> {
 
   // Receipt last: the server's authority over it is structural, not a matter of the
   // validator happening to drop a client-supplied one.
+  // kind is set here, not read from the payload: this route validates a text answer
+  // and nothing else, so a client claiming otherwise must not be believed.
   const record: InboxRecord = {
     ...fields,
+    kind: "text",
     receiptId: createReceiptId(),
     receivedAt: new Date().toISOString(),
   };
