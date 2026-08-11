@@ -1,17 +1,36 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { submitText } from "@/application/submissions/submit-text";
 import { createBrowserSubmissionRepository } from "@/composition/browser";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
-import { childStatusMeta, currentQuestion } from "@/content/avaloria-content";
+import {
+  avaloriaIdeas,
+  childCategories,
+  childStatusMeta,
+  currentQuestion,
+  type ChildCategory,
+  type ChildStatus,
+} from "@/content/avaloria-content";
 
 const repository = createBrowserSubmissionRepository();
 
+function statusFor(status: ChildStatus) {
+  return childStatusMeta.find((item) => item.id === status) ?? childStatusMeta[0];
+}
+
 export default function HomePage() {
+  const [selectedCategory, setSelectedCategory] = useState<ChildCategory | "Alle Ideen">("Alle Ideen");
   const [answer, setAnswer] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const visibleIdeas = useMemo(
+    () =>
+      selectedCategory === "Alle Ideen"
+        ? avaloriaIdeas
+        : avaloriaIdeas.filter((idea) => idea.childCategory === selectedCategory),
+    [selectedCategory],
+  );
 
   async function handleAnswerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,11 +110,50 @@ export default function HomePage() {
       </section>
 
       <section className="ideas-intro-section content-width" id="ideen" aria-labelledby="ideas-heading">
-        <div>
-          <p className="section-kicker">Die Welt wächst</p>
-          <h2 id="ideas-heading">Hier findest du bald alle Ideen.</h2>
+        <div className="section-heading ideas-heading">
+          <div>
+            <p className="section-kicker">Die Welt wächst</p>
+            <h2 id="ideas-heading">Was möchtest du entdecken?</h2>
+          </div>
+          <p className="section-support">Wähle ein Thema. Die kleinen Karten zeigen dir die passenden Ideen.</p>
         </div>
-        <p>Schau dich um und entdecke, welche Orte, Wesen und Abenteuer schon auf dich warten.</p>
+        <div className="category-row" aria-label="Themen auswählen">
+          <button
+            className={`category-chip ${selectedCategory === "Alle Ideen" ? "is-selected" : ""}`}
+            onClick={() => setSelectedCategory("Alle Ideen")}
+            type="button"
+          >
+            Alle Ideen
+          </button>
+          {childCategories.map((category) => (
+            <button
+              className={`category-chip ${selectedCategory === category.label ? "is-selected" : ""}`}
+              key={category.label}
+              onClick={() => setSelectedCategory(category.label)}
+              type="button"
+            >
+              <span aria-hidden="true">{category.icon}</span> {category.label}
+            </button>
+          ))}
+        </div>
+        <div className="idea-grid">
+          {visibleIdeas.map((idea) => {
+            const status = statusFor(idea.status);
+            return (
+              <article className="idea-card" key={idea.id}>
+                <div className="idea-card-topline">
+                  <span className={`idea-status status-${idea.status}`}>
+                    <span aria-hidden="true">{status.icon}</span> {status.label}
+                  </span>
+                  <span className="idea-category">{idea.childCategory}</span>
+                </div>
+                <h3>{idea.title}</h3>
+                <p>{idea.summary}</p>
+                <span className="idea-owner">Thema: {idea.internalCategory === "prologue" ? "Anfang der Geschichte" : idea.internalCategory === "main-story" ? "Hauptgeschichte" : "Weltidee"}</span>
+              </article>
+            );
+          })}
+        </div>
       </section>
 
       <section className="answer-section content-width" id="frage" aria-labelledby="question-heading">
