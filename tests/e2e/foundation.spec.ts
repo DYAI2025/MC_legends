@@ -21,3 +21,10 @@ test("status cards explain the four child-facing states", async ({ page }) => {
   await expect(page.getByText("Das ist noch nicht entschieden.", { exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Canon");
 });
+
+test("hero has two clear primary actions", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".hero-actions .button")).toHaveCount(2);
+  await expect(page.getByRole("link", { name: /Idee teilen/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Frage beantworten/ })).toBeVisible();
+});
