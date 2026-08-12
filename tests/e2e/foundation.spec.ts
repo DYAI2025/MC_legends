@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { avaloriaIdeas, childCategories } from "@/content/avaloria-content";
 
 const heroHeading = "Deine Ideen machen Avaloria größer.";
-const openQuestionHeading = "Welche Farbe soll der Fluss haben?";
+const openQuestionHeading = "Welches Tier soll dich in Avaloria begleiten?";
 
 function heroRegion(page: Page) {
   return page.getByRole("region", { name: heroHeading });
@@ -47,13 +48,15 @@ test("the open question uses simple language and a disabled empty answer", async
 
 test("the child view keeps six easy-to-understand idea groups", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".category-chip")).toHaveCount(7);
+  // One chip per group, plus the "Alle Ideen" chip.
+  await expect(page.locator(".category-chip")).toHaveCount(childCategories.length + 1);
 
   const historyChip = page.getByRole("button", { name: "Geschichte & Welt", pressed: false });
   await historyChip.click();
   await expect(page.getByRole("button", { name: "Geschichte & Welt", pressed: true })).toBeVisible();
 
-  await expect(page.getByRole("heading", { name: "Das Tor ins grüne Tal" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Die Lichter von Avaloria" })).toBeVisible();
-  await expect(page.locator(".idea-card")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Zwanzig Jahre Wiederaufbau" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Die Druhen werden stärker" })).toBeVisible();
+  const historyIdeas = avaloriaIdeas.filter((idea) => idea.childCategory === "Geschichte & Welt");
+  await expect(page.locator(".idea-card")).toHaveCount(historyIdeas.length);
 });

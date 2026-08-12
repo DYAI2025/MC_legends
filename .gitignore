@@ -31,3 +31,6 @@ artifacts/
 
 # local generator validation logs
 /.validation/
+
+# local family project inbox (AVALORIA_INBOX_DIR default)
+/.data/
