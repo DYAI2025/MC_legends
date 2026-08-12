@@ -63,6 +63,7 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
  */
 let protectedRouteLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
+let globalFamilySessionLimiter: RateLimiter | null = null;
 
 export function createProtectedRouteRateLimiter(): RateLimiter {
   protectedRouteLimiter ??= new InMemoryRateLimiter({
@@ -81,6 +82,29 @@ export function createFamilySessionRateLimiter(): RateLimiter {
 }
 
 /**
+ * One bucket for every sign-in attempt this process sees, whatever the caller claims
+ * to be.
+ *
+ * The per-caller limiter above is keyed by `x-forwarded-for` / `x-real-ip`, and those
+ * headers are written by the caller. A limiter keyed only by them is a limiter the
+ * attacker resets at will: a new value per guess is a new allowance per guess. This one
+ * has a single constant key, so rotating a header buys nothing.
+ *
+ * Set well above what a household plausibly needs and well below what guessing a shared
+ * code needs, and it is a ceiling on the whole process rather than fairness between
+ * callers: a flood does slow down the family's own sign-in until the window passes.
+ * That is the intended trade for a private family MVP, and it is still process-local -
+ * two app instances allow this ceiling each.
+ */
+export function createGlobalFamilySessionRateLimiter(): RateLimiter {
+  globalFamilySessionLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT, 60),
+    windowMs: positiveInteger(process.env.AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS, 60_000),
+  });
+  return globalFamilySessionLimiter;
+}
+
+/**
  * Drops the process-local counters. Exists for tests: they need a limiter that was
  * built from the limits the case just configured, and they must not inherit the
  * attempts of the case before them. Nothing in the running app calls this.
@@ -88,4 +112,5 @@ export function createFamilySessionRateLimiter(): RateLimiter {
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
   familySessionLimiter = null;
+  globalFamilySessionLimiter = null;
 }

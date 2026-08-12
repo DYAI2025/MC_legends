@@ -7,6 +7,7 @@ import {
 import {
   createFamilyAccessGate,
   createFamilySessionRateLimiter,
+  createGlobalFamilySessionRateLimiter,
 } from "@/composition/server";
 
 /**
@@ -23,6 +24,9 @@ import {
 /** A code and nothing else. Far below the inbox limit, because far less is expected. */
 const MAX_BODY_BYTES = 1024;
 const MAX_ACCESS_CODE_LENGTH = 200;
+
+/** One constant key: the whole process shares this bucket, by design. */
+const GLOBAL_SIGN_IN_KEY = "family-session";
 
 type SessionError = "invalid-payload" | "invalid-credentials" | "too-many-requests" | "gate-unavailable";
 
@@ -51,6 +55,17 @@ function readAccessCode(body: unknown): string | null {
 export async function POST(request: Request): Promise<Response> {
   // Before the body, and before any comparison: a brute-force attempt must be cheap to
   // refuse, and guessing a shared code is exactly what this endpoint invites.
+  //
+  // The process-wide bucket is consumed first and deliberately: `clientAddress` reads
+  // caller-written headers, so the per-caller bucket below is one an attacker can hand
+  // itself a fresh copy of by rotating `x-forwarded-for`. The global bucket has a single
+  // constant key and cannot be reset that way, which is what makes the ceiling real.
+  // The per-caller bucket stays because it is what keeps one noisy caller from spending
+  // the whole household's allowance.
+  if (!createGlobalFamilySessionRateLimiter().tryConsume(GLOBAL_SIGN_IN_KEY)) {
+    return refuse(429, "too-many-requests");
+  }
+
   if (!createFamilySessionRateLimiter().tryConsume(clientAddress(request))) {
     return refuse(429, "too-many-requests");
   }

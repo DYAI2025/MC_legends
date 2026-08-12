@@ -46,6 +46,8 @@ beforeEach(() => {
   delete process.env.AVALORIA_SESSION_SECRET;
   delete process.env.AVALORIA_SESSION_RATE_LIMIT;
   delete process.env.AVALORIA_SESSION_RATE_WINDOW_MS;
+  delete process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT;
+  delete process.env.AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS;
   resetRateLimitersForTest();
 });
 
@@ -190,6 +192,58 @@ describe("POST /api/family/session", () => {
     expect((await guessFrom("203.0.113.5")).status).toBe(401);
     expect((await guessFrom("203.0.113.5")).status).toBe(429);
     expect((await guessFrom("203.0.113.6")).status).toBe(401);
+  });
+
+  it("caps sign-in attempts for the whole process however the caller address is spoofed", async () => {
+    // The per-caller allowance is put out of the way on purpose: what is under test is
+    // the bucket that a rotated x-forwarded-for cannot reset. `x-forwarded-for` is
+    // written by the caller, so a per-address counter alone is a counter the attacker
+    // owns - N addresses buy N times the allowance, which is no allowance at all.
+    process.env.AVALORIA_SESSION_RATE_LIMIT = "1000";
+    process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT = "4";
+    resetRateLimitersForTest();
+
+    const guessFrom = (address: string) =>
+      POST(postRequest(JSON.stringify({ accessCode: "falsch" }), { "x-forwarded-for": address }));
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      expect((await guessFrom(`203.0.113.${attempt}`)).status, `attempt ${attempt}`).toBe(401);
+    }
+
+    // A fifth address is a fresh per-caller bucket and still no fresh allowance.
+    await expectRefusal(await guessFrom("203.0.113.99"), 429, "too-many-requests");
+
+    // Nor does knowing the real code buy a way past the global brake.
+    const withRightCode = await POST(
+      postRequest(JSON.stringify({ accessCode: TEST_FAMILY_ACCESS_CODE }), {
+        "x-forwarded-for": "198.51.100.7",
+      }),
+    );
+    await expectRefusal(withRightCode, 429, "too-many-requests");
+  });
+
+  it("counts a sign-in with no caller address header against the same global bucket", async () => {
+    process.env.AVALORIA_SESSION_RATE_LIMIT = "1000";
+    process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT = "2";
+    resetRateLimitersForTest();
+
+    // Dropping the header entirely must not be a way out either.
+    expect((await POST(postRequest(JSON.stringify({ accessCode: "falsch" })))).status).toBe(401);
+    expect(
+      (
+        await POST(
+          postRequest(JSON.stringify({ accessCode: "falsch" }), {
+            "x-real-ip": "203.0.113.44",
+          }),
+        )
+      ).status,
+    ).toBe(401);
+
+    await expectRefusal(
+      await POST(postRequest(JSON.stringify({ accessCode: "falsch" }))),
+      429,
+      "too-many-requests",
+    );
   });
 
   it("exposes no method beyond POST", () => {

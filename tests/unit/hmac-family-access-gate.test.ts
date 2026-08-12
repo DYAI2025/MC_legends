@@ -130,4 +130,50 @@ describe("HmacFamilyAccessGate", () => {
       "denied",
     );
   });
+
+  it("denies a session minted under a rotated access code even when the signing secret is unchanged", () => {
+    const now = Date.UTC(2026, 7, 12);
+    const stale = grantedSession(now, {
+      accessCode: "old-code-1234",
+      sessionSecret: "stable-secret",
+    });
+
+    // The case that matters in a deployment: AVALORIA_SESSION_SECRET is set once and
+    // left alone, and the shared code is rotated because it leaked. If the signing key
+    // ignored the code whenever a secret was configured, rotating the code would revoke
+    // nothing at all.
+    const afterRotation = gateAt(now, {
+      accessCode: "new-code-5678",
+      sessionSecret: "stable-secret",
+    });
+
+    expect(afterRotation.verifySession(stale.value).outcome).toBe("denied");
+  });
+
+  it("keeps a session valid when neither the code nor the secret changed", () => {
+    // The other side of the case above: the key derivation must be stable, not merely
+    // different every time - otherwise the test above would pass for the wrong reason.
+    const now = Date.UTC(2026, 7, 12);
+    const session = grantedSession(now, {
+      accessCode: "old-code-1234",
+      sessionSecret: "stable-secret",
+    });
+
+    expect(
+      gateAt(now, { accessCode: "old-code-1234", sessionSecret: "stable-secret" }).verifySession(
+        session.value,
+      ).outcome,
+    ).toBe("granted");
+  });
+
+  it("does not let a code/secret split be shifted to produce the same signing key", () => {
+    // ("ab", "c") and ("a", "bc") must not derive the same key: concatenating the two
+    // configured values without unambiguous framing is how that happens.
+    const now = Date.UTC(2026, 7, 12);
+    const session = grantedSession(now, { accessCode: "ab", sessionSecret: "c" });
+
+    expect(
+      gateAt(now, { accessCode: "a", sessionSecret: "bc" }).verifySession(session.value).outcome,
+    ).toBe("denied");
+  });
 });

@@ -17,10 +17,23 @@ const TOKEN_VERSION = "v1";
 
 const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+/**
+ * Length-prefixed framing, so concatenating two configured values stays unambiguous:
+ * the byte length is written before the value and the value cannot be misread as part
+ * of the next field.
+ */
+function framed(value: string): string {
+  return `${Buffer.byteLength(value, "utf8")}:${value}`;
+}
+
 export type HmacFamilyAccessGateOptions = Readonly<{
   /** The server-only shared family code. Absent or blank means the gate is unusable. */
   accessCode: string | undefined;
-  /** Optional signing secret. Derived from the access code when not configured. */
+  /**
+   * Optional extra signing secret. It is mixed into the signing key alongside the
+   * access code, never used instead of it: with it unset the key rests on the access
+   * code alone, and with it set rotating either value still revokes every session.
+   */
   sessionSecret?: string | undefined;
   ttlSeconds?: number;
   now?: () => number;
@@ -32,9 +45,10 @@ export type HmacFamilyAccessGateOptions = Readonly<{
  * keeps this correct across restarts and across more than one process - the very
  * thing the in-memory rate limiter cannot claim.
  *
- * The signing key is derived from the configured secret rather than used directly, so
- * the raw secret is never the value being HMAC'd with, and rotating the access code
- * invalidates every session minted under the old one.
+ * The signing key is derived from the whole configured secret material rather than from
+ * one part of it, so rotating *either* the access code or the session secret invalidates
+ * every session minted under the previous configuration. Neither value travels in the
+ * token; only a domain-separated HMAC of the expiry and nonce does.
  */
 export class HmacFamilyAccessGate implements FamilyAccessGate {
   private readonly configuredCode: string;
@@ -111,9 +125,22 @@ export class HmacFamilyAccessGate implements FamilyAccessGate {
     return this.configuredCode.length > 0;
   }
 
+  /**
+   * Derived from the access code AND the optional session secret together, never from
+   * one instead of the other.
+   *
+   * Deriving from `sessionSecret || accessCode` looked equivalent and was not: with a
+   * secret configured, rotating a leaked access code changed no key and revoked no
+   * session. Both values now feed the key, so changing either one invalidates every
+   * token minted before the change.
+   *
+   * Each field is length-prefixed before being concatenated, so a code/secret pair
+   * cannot be shifted into another pair with the same key material - ("ab", "c") and
+   * ("a", "bc") must not sign the same way.
+   */
   private signingKey(): Buffer {
-    const base = this.sessionSecret.length > 0 ? this.sessionSecret : this.configuredCode;
-    return createHmac("sha256", base).update(SESSION_KEY_LABEL).digest();
+    const material = `${framed(this.configuredCode)}${framed(this.sessionSecret)}`;
+    return createHmac("sha256", material).update(SESSION_KEY_LABEL).digest();
   }
 
   private sign(payload: string): string {

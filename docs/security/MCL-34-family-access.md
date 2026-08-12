@@ -41,9 +41,14 @@ family types the shared code
   terminates TLS in the deployment, and local dev/browser tests run on plain http).
 - The cookie value is `v1.<expiry>.<nonce>.<HMAC over expiry and nonce>`. It is
   **stateless**: verification re-derives the HMAC, so there is no session store to lose
-  across restarts or to diverge across processes. The signing key is derived from
-  `AVALORIA_SESSION_SECRET` when set, otherwise from the access code.
-- Rotating the access code invalidates every session minted under the old one.
+  across restarts or to diverge across processes.
+- The signing key is derived from a domain separator plus **both** the access code and
+  the optional `AVALORIA_SESSION_SECRET`, each length-prefixed so the two fields cannot
+  be shifted into one another. Neither value appears in the token.
+- Rotating **either** the access code or the session secret invalidates every session
+  minted under the previous configuration. An earlier version derived the key from
+  `AVALORIA_SESSION_SECRET` *or* the access code; with a secret configured, rotating a
+  leaked code then revoked nothing. That is fixed and pinned by a regression test.
 
 ### Secret boundary
 
@@ -92,16 +97,40 @@ is refused with 401.
 
 | Endpoint | Key | Default | Env override |
 | --- | --- | --- | --- |
+| `POST /api/family/session` | **one constant key for the whole process** | 60 / 60s | `AVALORIA_SESSION_GLOBAL_RATE_LIMIT`, `AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS` |
 | `POST /api/family/session` | client address | 20 / 60s | `AVALORIA_SESSION_RATE_LIMIT`, `AVALORIA_SESSION_RATE_WINDOW_MS` |
 | `POST /api/inbox/submissions` | client address + session fingerprint | 30 / 60s | `AVALORIA_INBOX_RATE_LIMIT`, `AVALORIA_INBOX_RATE_WINDOW_MS` |
 
+Sign-in consumes the global bucket **first**, then the per-caller one. The reason is
+that `clientAddress` reads `x-forwarded-for` / `x-real-ip`, which the caller writes: a
+per-address counter alone hands an attacker a fresh allowance for every value it makes
+up. The global bucket has a single constant key, so rotating a header buys nothing, and
+the correct access code does not bypass it either. The per-caller bucket is kept for
+what it is actually good at - stopping one noisy caller from spending the household's
+whole allowance.
+
+### Memory bound
+
+`InMemoryRateLimiter` holds at most `maxTrackedKeys` distinct keys (default 5000).
+Reaching that number sweeps entries whose attempts have all aged out; if the map is
+still full, a key never seen before is **refused** rather than admitted, because an
+admitted-but-untracked caller would be an unlimited one. An earlier version only swept,
+which is not a bound: keys arriving faster than the window expires still grew the map.
+
+The honest cost: a flood of made-up keys can make this process refuse a caller it has
+not seen before until the window passes. That is taken deliberately - a refusal is
+recoverable, unbounded growth is not - and the global sign-in bucket above now caps how
+much such a flood can reach the sign-in path in the first place.
+
 This is an MVP abuse brake. It is **not** production-grade:
 
-- **process-local** - two app instances each allow the full limit;
+- **process-local** - two app instances each allow the full limit, including the
+  "global" sign-in ceiling, which is global to one process and nothing wider;
 - **not distributed** - no shared store, no coordination;
 - **reset by a restart** - every counter is forgotten;
-- the client address comes from `x-forwarded-for` / `x-real-ip`, which a caller can
-  spoof; behind an unknown proxy every caller can share one `unknown` bucket.
+- the per-caller key still comes from `x-forwarded-for` / `x-real-ip`, which a caller
+  can spoof; behind an unknown proxy every caller can share one `unknown` bucket. Only
+  the process-wide bucket is unaffected by that.
 
 A refused attempt is not counted, so a blocked caller cannot push its own window
 forward indefinitely.
@@ -157,7 +186,9 @@ failure discards the locally saved submission.
    returns on the next page load. The wording is honest but not specific.
 2. One shared code for the whole family: no per-person identity, no revocation of a
    single device, no sign-out endpoint.
-3. Rate limiting and file-store idempotency are single-process, as described above.
+3. Rate limiting and file-store idempotency are single-process, as described above. The
+   process-wide sign-in ceiling closes the header-spoofing bypass within one process and
+   nothing beyond it; a second app instance carries its own ceiling.
 4. No consent, retention, deletion or account policy is implemented or claimed.
 5. There is still no read path for submissions - MCL-50 - so "no anonymous GET access"
    currently holds because no GET exists at all.
@@ -166,10 +197,12 @@ failure discards the locally saved submission.
 
 ```bash
 AVALORIA_FAMILY_ACCESS_CODE=<shared family code>   # required; without it nobody gets in
-AVALORIA_SESSION_SECRET=<random string>            # optional; derived from the code if unset
+AVALORIA_SESSION_SECRET=<random string>            # optional; mixed in with the code
 AVALORIA_INBOX_DIR=.data/inbox                     # optional
-AVALORIA_SESSION_RATE_LIMIT=20                     # optional
+AVALORIA_SESSION_RATE_LIMIT=20                     # optional; per caller address
 AVALORIA_SESSION_RATE_WINDOW_MS=60000              # optional
+AVALORIA_SESSION_GLOBAL_RATE_LIMIT=60              # optional; whole process, unspoofable
+AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS=60000       # optional
 AVALORIA_INBOX_RATE_LIMIT=30                       # optional
 AVALORIA_INBOX_RATE_WINDOW_MS=60000                # optional
 ```

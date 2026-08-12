@@ -75,4 +75,67 @@ describe("InMemoryRateLimiter", () => {
     expect(limiter.tryConsume("a")).toBe(true);
     expect(limiter.tryConsume("a")).toBe(false);
   });
+
+  it("refuses a new key once the tracked-key capacity is reached instead of growing", () => {
+    const clock = { value: 0 };
+    const limiter = new InMemoryRateLimiter({
+      limit: 5,
+      windowMs: 1000,
+      maxTrackedKeys: 3,
+      now: () => clock.value,
+    });
+
+    expect([limiter.tryConsume("a"), limiter.tryConsume("b"), limiter.tryConsume("c")]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    // No room to track a fourth caller, so it fails closed rather than being admitted
+    // untracked - an untracked caller would be an unlimited one.
+    expect(limiter.tryConsume("d")).toBe(false);
+
+    // A caller already tracked still gets the rest of its own allowance.
+    expect(limiter.tryConsume("a")).toBe(true);
+  });
+
+  it("cannot be grown without bound by a flood of fresh unique keys", () => {
+    const clock = { value: 0 };
+    const limiter = new InMemoryRateLimiter({
+      limit: 1,
+      windowMs: 1000,
+      maxTrackedKeys: 8,
+      now: () => clock.value,
+    });
+
+    // Exactly the spoofing shape: every attempt arrives under a key never seen before.
+    let admitted = 0;
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+      if (limiter.tryConsume(`spoofed-${attempt}`)) {
+        admitted += 1;
+      }
+    }
+
+    expect(admitted).toBe(8);
+  });
+
+  it("reclaims capacity from keys whose attempts have all aged out", () => {
+    const clock = { value: 0 };
+    const limiter = new InMemoryRateLimiter({
+      limit: 5,
+      windowMs: 1000,
+      maxTrackedKeys: 3,
+      now: () => clock.value,
+    });
+
+    for (const key of ["a", "b", "c"]) {
+      limiter.tryConsume(key);
+    }
+    expect(limiter.tryConsume("d")).toBe(false);
+
+    // Once the three tracked windows have passed, the space they hold is stale and a
+    // new caller must get it - the bound is a memory bound, not a permanent lockout.
+    clock.value = 1001;
+    expect(limiter.tryConsume("d")).toBe(true);
+  });
 });
