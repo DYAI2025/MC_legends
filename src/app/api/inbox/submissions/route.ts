@@ -1,12 +1,19 @@
+import { readBoundedJson } from "@/adapters/http/bounded-json-body";
+import { guardFamilyRequest } from "@/adapters/http/family-request-guard";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
-import { createReceiptId, createSubmissionInboxStore } from "@/composition/server";
+import {
+  createFamilyAccessGate,
+  createProtectedRouteRateLimiter,
+  createReceiptId,
+  createSubmissionInboxStore,
+} from "@/composition/server";
 
 /**
  * Validation and receipt minting live in this route on purpose: with a single
  * endpoint, a use case in src/application would be indirection without a second
- * caller. When the authenticated inbox work adds auth, de-duplication and an admin
- * read to this file - and `append` likely becomes `appendIfAbsent` - that is the
- * moment to lift this logic into src/application behind a receiveSubmission use case.
+ * caller. The access decision and the body guards are the exception - they are shared
+ * with the sign-in route and with the protected read of MCL-50, so they live in
+ * adapters where a second caller can have them unchanged.
  */
 
 /** The fields a client submits; the receipt fields are added by this server. */
@@ -32,76 +39,15 @@ const MAX_LENGTHS = {
  */
 const MAX_BODY_BYTES = 16 * 1024;
 
+type InboxError =
+  | "invalid-payload"
+  | "unauthorized"
+  | "too-many-requests"
+  | "inbox-unavailable";
+
 /** Machine-readable codes only - never an exception message, path or stack trace. */
-function refuse(status: 400 | 503, error: "invalid-payload" | "inbox-unavailable"): Response {
+function refuse(status: 400 | 401 | 429 | 503, error: InboxError): Response {
   return Response.json({ acknowledged: false, error }, { status });
-}
-
-/**
- * Required, so that once the authenticated family gate lands, a cross-origin
- * `text/plain` POST cannot reach this route as a simple request without a preflight.
- */
-function hasJsonContentType(request: Request): boolean {
-  const contentType = request.headers.get("content-type");
-  return contentType !== null && contentType.split(";")[0].trim().toLowerCase() === "application/json";
-}
-
-/** False only when the client itself declares a body too large to accept. */
-function declaresAcceptableSize(request: Request): boolean {
-  const declared = request.headers.get("content-length");
-  if (declared === null) {
-    // No declared length means chunked framing. It is not refused here - an
-    // intermediary may legitimately re-frame a request - but nothing is trusted
-    // either: readBoundedBody caps what is actually read.
-    return true;
-  }
-
-  const bytes = Number(declared);
-  return Number.isInteger(bytes) && bytes >= 0 && bytes <= MAX_BODY_BYTES;
-}
-
-/**
- * Reads the body with a hard byte cap instead of buffering whatever arrives. Returns
- * null as soon as the cap is passed, so an oversized body is abandoned mid-stream and
- * never fully held in memory or handed to the parser.
- */
-async function readBoundedBody(request: Request): Promise<string | null> {
-  const stream = request.body;
-  if (stream === null) {
-    return null;
-  }
-
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      received += value.byteLength;
-      if (received > MAX_BODY_BYTES) {
-        await reader.cancel();
-        return null;
-      }
-
-      chunks.push(value);
-    }
-
-    const merged = new Uint8Array(received);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-
-    // Strict decoding: malformed UTF-8 must be refused, not silently replaced,
-    // because the submitted text has to survive byte for byte.
-    return new TextDecoder("utf-8", { fatal: true }).decode(merged);
-  } catch {
-    return null;
-  }
 }
 
 function readField(source: Record<string, unknown>, field: keyof SubmittedFields): string | null {
@@ -139,7 +85,7 @@ function readSubmittedFields(body: unknown): SubmittedFields | null {
   }
 
   // A createdAt that is not a real instant would sort as garbage in the admin view
-  // the authenticated inbox work adds later.
+  // MCL-50 adds later.
   if (Number.isNaN(Date.parse(createdAt))) {
     return null;
   }
@@ -147,24 +93,38 @@ function readSubmittedFields(body: unknown): SubmittedFields | null {
   return { submissionId, questionId, createdAt, originalText };
 }
 
+/** The one shape a positive answer has, whether this call stored the record or found it. */
+function acknowledge(record: InboxRecord, status: 200 | 201): Response {
+  return Response.json(
+    { acknowledged: true, receiptId: record.receiptId, receivedAt: record.receivedAt },
+    { status },
+  );
+}
+
 export async function POST(request: Request): Promise<Response> {
-  if (!hasJsonContentType(request) || !declaresAcceptableSize(request)) {
-    return refuse(400, "invalid-payload");
+  // First, and from headers alone. An unauthorised caller must not be able to make
+  // this server read, decode or parse a single byte of its body - which is also why
+  // the guard takes the request rather than anything derived from it.
+  const access = guardFamilyRequest(
+    request,
+    createFamilyAccessGate(),
+    createProtectedRouteRateLimiter(),
+  );
+
+  if (access === "unavailable") {
+    console.error("family access gate unavailable: no access code configured");
+    return refuse(503, "inbox-unavailable");
   }
 
-  const text = await readBoundedBody(request);
-  if (text === null) {
-    return refuse(400, "invalid-payload");
+  if (access === "unauthorized") {
+    return refuse(401, "unauthorized");
   }
 
-  let body: unknown;
-
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return refuse(400, "invalid-payload");
+  if (access === "rate-limited") {
+    return refuse(429, "too-many-requests");
   }
 
+  const body = await readBoundedJson(request, MAX_BODY_BYTES);
   const fields = readSubmittedFields(body);
   if (fields === null) {
     return refuse(400, "invalid-payload");
@@ -181,8 +141,10 @@ export async function POST(request: Request): Promise<Response> {
     receivedAt: new Date().toISOString(),
   };
 
+  let outcome: Awaited<ReturnType<ReturnType<typeof createSubmissionInboxStore>["appendIfAbsent"]>>;
+
   try {
-    await createSubmissionInboxStore().append(record);
+    outcome = await createSubmissionInboxStore().appendIfAbsent(record);
   } catch (cause) {
     // Server-side only. The response stays a bare code so nothing internal reaches a
     // child's browser, but an outage has to leave a trace somewhere.
@@ -190,11 +152,15 @@ export async function POST(request: Request): Promise<Response> {
     return refuse(503, "inbox-unavailable");
   }
 
-  // 201, not 202: the record is durably appended before this answer is sent, so
-  // nothing is merely accepted for later processing. No Location header on purpose -
-  // there is no readable resource until the authenticated read side lands.
-  return Response.json(
-    { acknowledged: true, receiptId: record.receiptId, receivedAt: record.receivedAt },
-    { status: 201 },
-  );
+  if (!outcome.stored) {
+    // A retry of something already held. Answered with the receipt that submission
+    // already has, so the same submissionId can never carry two different receipts -
+    // and 200 rather than 201, because this call created nothing.
+    return acknowledge(outcome.existing, 200);
+  }
+
+  // 201: the record is durably appended before this answer is sent, so nothing is
+  // merely accepted for later processing. No Location header on purpose - there is no
+  // readable resource until the protected read side of MCL-50 lands.
+  return acknowledge(record, 201);
 }

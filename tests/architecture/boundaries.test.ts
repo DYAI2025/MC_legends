@@ -71,6 +71,36 @@ describe("architecture boundaries", () => {
     );
   });
 
+  it("names the family access secrets only in the server composition root", async () => {
+    // The variables themselves, not just a leaked value: a component that reads
+    // process.env.AVALORIA_FAMILY_ACCESS_CODE is how the code reaches the bundle in
+    // the first place, and it is a change to source that must fail here, not a build
+    // artifact somebody has to remember to scan.
+    await expectNoForbiddenSource(
+      "src",
+      [/AVALORIA_FAMILY_ACCESS_CODE/, /AVALORIA_SESSION_SECRET/],
+      ["src/composition/server.ts"],
+    );
+  });
+
+  it("exposes nothing to the client bundle through a NEXT_PUBLIC_ variable", async () => {
+    // No exclusions on purpose. NEXT_PUBLIC_ is the one prefix Next.js inlines into
+    // browser code, so there is no file in src where introducing one is routine.
+    await expectNoForbiddenSource("src", [/NEXT_PUBLIC_/]);
+  });
+
+  it("keeps the server composition root and node APIs out of the client components", async () => {
+    for (const clientComponent of [
+      "src/app/family-experience.tsx",
+      "src/app/components/family-access-gate.tsx",
+    ]) {
+      await expectNoForbiddenSource(clientComponent, [
+        /from ["']@\/composition\/server["']/,
+        /from ["']node:/,
+      ]);
+    }
+  });
+
   it("keeps the content datasets independent from the delivery layer", async () => {
     await expectNoForbiddenSource("src/content", [
       /from ["']next(?:\/|["'])/,

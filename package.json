@@ -20,7 +20,8 @@
     "test:architecture": "vitest run tests/architecture",
     "check:foundation": "node scripts/check-foundation.mjs",
     "verify": "npm run check:foundation && npm run check:secrets && npm run lint && npm run typecheck && npm run test && npm run build",
-    "check:secrets": "node scripts/check-secrets.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:client-secrets": "node scripts/check-client-secrets.mjs"
   },
   "dependencies": {
     "next": "16.3.0",
