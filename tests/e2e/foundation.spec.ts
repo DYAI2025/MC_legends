@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { avaloriaIdeas, childCategories } from "@/content/avaloria-content";
+import { signInAsFamily } from "../support/family-session";
 
 const heroHeading = "Deine Ideen machen Avaloria größer.";
 const openQuestionHeading = "Welches Tier soll dich in Avaloria begleiten?";
@@ -39,6 +40,9 @@ test("hero has two clear primary actions", async ({ page }) => {
 });
 
 test("the open question uses simple language and a disabled empty answer", async ({ page }) => {
+  // The question itself is readable for everyone; the answer form needs the family
+  // session, so this test signs in before looking for it.
+  await signInAsFamily(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 2, name: openQuestionHeading })).toBeVisible();
   await expect(page.getByLabel("Deine Antwort")).toBeVisible();

@@ -50,8 +50,19 @@ jobs:
       - name: Unit and architecture tests
         run: npm run test
 
+      # Distinctive canary values, so the scan below is looking for something that was
+      # actually present while the client bundle was produced.
       - name: Build
         run: npm run build
+        env:
+          AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
+          AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
+
+      - name: Client bundle secret scan
+        run: npm run check:client-secrets
+        env:
+          AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
+          AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
 
       - name: Require committed next-env types
         shell: bash

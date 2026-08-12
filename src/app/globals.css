@@ -87,6 +87,8 @@ form { margin-top: 24px; }
 label { display: block; font-size: .82rem; font-weight: 900; margin-bottom: 8px; }
 textarea { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); display: block; line-height: 1.5; min-height: 116px; padding: 13px; resize: vertical; width: 100%; }
 textarea::placeholder { color: #9aa69c; }
+.family-gate-intro { color: var(--muted); line-height: 1.55; margin: 0 0 16px; }
+.family-gate input { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); display: block; line-height: 1.5; padding: 13px; width: 100%; }
 .form-footer { align-items: center; display: flex; flex-wrap: wrap; gap: 16px; margin-top: 13px; }
 .form-message { color: #4a824a; font-size: .82rem; font-weight: 800; margin: 14px 0 0; }
 .upcoming-questions { margin-top: 24px; }

@@ -5,26 +5,44 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as inboxRoute from "@/app/api/inbox/submissions/route";
 import { POST } from "@/app/api/inbox/submissions/route";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import { resetRateLimitersForTest } from "@/composition/server";
+import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
+import { familySessionCookieHeader } from "../support/family-session-header";
 
 const ENDPOINT = "http://localhost/api/inbox/submissions";
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 const INBOX_FILE = "submissions.jsonl";
 
-const originalInboxDirectory = process.env.AVALORIA_INBOX_DIR;
+const environment = { ...process.env };
 const originalWorkingDirectory = process.cwd();
 
 let directory = "";
+let sessionCookie = "";
 
 const MAX_BODY_BYTES = 16 * 1024;
 
 /**
  * A Request built in-process carries no content-length - only a real HTTP client sets
  * one - so every test that wants the normal path has to declare it explicitly.
+ *
+ * The session cookie is part of the normal path now: every case that is not about
+ * access control sends a real one, so those cases keep testing what they always did.
  */
-function postRequest(
-  body: string,
-  headers: Record<string, string> = {},
-): Request {
+function postRequest(body: string, headers: Record<string, string> = {}): Request {
+  return new Request(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(body, "utf8")),
+      cookie: sessionCookie,
+      ...headers,
+    },
+    body,
+  });
+}
+
+/** Deliberately without the cookie the helper above always adds. */
+function anonymousRequest(body: string, headers: Record<string, string> = {}): Request {
   return new Request(ENDPOINT, {
     method: "POST",
     headers: {
@@ -62,6 +80,7 @@ async function expectRefusal(response: Response, status: number, error: string):
 
   const raw = await response.text();
   expect(raw, "a refusal must carry no internal detail").not.toMatch(INTERNAL_DETAIL);
+  expect(raw, "a refusal must never echo the access code").not.toContain(TEST_FAMILY_ACCESS_CODE);
   expect(JSON.parse(raw)).toEqual({ acknowledged: false, error });
 }
 
@@ -73,20 +92,87 @@ async function inboxLines(inboxDirectory = directory): Promise<InboxRecord[]> {
     .map((line) => JSON.parse(line) as InboxRecord);
 }
 
+async function expectNothingStored(): Promise<void> {
+  await expect(inboxLines()).rejects.toThrow();
+}
+
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "avaloria-inbox-route-"));
   process.env.AVALORIA_INBOX_DIR = directory;
+  process.env.AVALORIA_FAMILY_ACCESS_CODE = TEST_FAMILY_ACCESS_CODE;
+  delete process.env.AVALORIA_SESSION_SECRET;
+  delete process.env.AVALORIA_INBOX_RATE_LIMIT;
+  delete process.env.AVALORIA_INBOX_RATE_WINDOW_MS;
+  resetRateLimitersForTest();
+  sessionCookie = familySessionCookieHeader(TEST_FAMILY_ACCESS_CODE);
 });
 
 afterEach(async () => {
   process.chdir(originalWorkingDirectory);
-
-  if (originalInboxDirectory === undefined) {
-    delete process.env.AVALORIA_INBOX_DIR;
-  } else {
-    process.env.AVALORIA_INBOX_DIR = originalInboxDirectory;
-  }
+  process.env = { ...environment };
+  resetRateLimitersForTest();
   await rm(directory, { recursive: true, force: true });
+});
+
+describe("POST /api/inbox/submissions access", () => {
+  it("refuses an anonymous submission and stores nothing", async () => {
+    const request = anonymousRequest(validPayload());
+
+    const response = await POST(request);
+
+    await expectRefusal(response, 401, "unauthorized");
+    // The point of checking access first: an unauthorised caller never gets this
+    // server to read, decode or parse a single byte of its body.
+    expect(request.bodyUsed).toBe(false);
+    await expectNothingStored();
+  });
+
+  it("refuses a forged session and stores nothing", async () => {
+    const response = await POST(
+      anonymousRequest(validPayload(), {
+        cookie: "avaloria_family_session=v1.9999999999.nonce.forged-signature",
+      }),
+    );
+
+    await expectRefusal(response, 401, "unauthorized");
+    await expectNothingStored();
+  });
+
+  it("refuses a session minted under a different access code and stores nothing", async () => {
+    const response = await POST(
+      anonymousRequest(validPayload(), {
+        cookie: familySessionCookieHeader("ein-ganz-anderer-familien-code"),
+      }),
+    );
+
+    await expectRefusal(response, 401, "unauthorized");
+    await expectNothingStored();
+  });
+
+  it("fails closed and stores nothing when no access code is configured", async () => {
+    delete process.env.AVALORIA_FAMILY_ACCESS_CODE;
+
+    // Even the session that was valid a moment ago must not get in: a gate that cannot
+    // decide has to refuse everyone, not wave through whoever already holds a cookie.
+    const response = await POST(postRequest(validPayload()));
+
+    await expectRefusal(response, 503, "inbox-unavailable");
+    await expectNothingStored();
+  });
+
+  it("refuses a signed-in caller that submits too often, without acknowledging", async () => {
+    process.env.AVALORIA_INBOX_RATE_LIMIT = "2";
+    resetRateLimitersForTest();
+
+    expect((await POST(postRequest(validPayload({ submissionId: "sub-a" })))).status).toBe(201);
+    expect((await POST(postRequest(validPayload({ submissionId: "sub-b" })))).status).toBe(201);
+
+    const refused = await POST(postRequest(validPayload({ submissionId: "sub-c" })));
+
+    await expectRefusal(refused, 429, "too-many-requests");
+    const records = await inboxLines();
+    expect(records.map((entry) => entry.submissionId)).toEqual(["sub-a", "sub-b"]);
+  });
 });
 
 describe("POST /api/inbox/submissions", () => {
@@ -135,6 +221,71 @@ describe("POST /api/inbox/submissions", () => {
     expect(records[0].receivedAt).toBe(body.receivedAt);
   });
 
+  it("answers a retried submissionId with the receipt it already has, and stores no duplicate", async () => {
+    const first = await POST(postRequest(validPayload()));
+    expect(first.status).toBe(201);
+    const firstReceipt = (await first.json()) as { receiptId: string; receivedAt: string };
+
+    const retry = await POST(postRequest(validPayload()));
+
+    // 200, not 201: this call created nothing.
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual({
+      acknowledged: true,
+      receiptId: firstReceipt.receiptId,
+      receivedAt: firstReceipt.receivedAt,
+    });
+
+    const records = await inboxLines();
+    expect(records).toHaveLength(1);
+    expect(records[0].receiptId).toBe(firstReceipt.receiptId);
+  });
+
+  it("keeps the stored original text when a retry arrives with different text", async () => {
+    const first = await POST(postRequest(validPayload()));
+    const firstReceipt = (await first.json()) as { receiptId: string };
+
+    // Same id, different text: the stored original artifact must not be rewritten by a
+    // later delivery, whatever that delivery claims.
+    const retry = await POST(
+      postRequest(validPayload({ originalText: "Ein ganz anderer Satz." })),
+    );
+
+    expect(retry.status).toBe(200);
+    const records = await inboxLines();
+    expect(records).toHaveLength(1);
+    expect(records[0].originalText).toBe(ORIGINAL_TEXT);
+    expect(records[0].receiptId).toBe(firstReceipt.receiptId);
+  });
+
+  it("keeps two different submissionIds apart", async () => {
+    await POST(postRequest(validPayload({ submissionId: "sub-001" })));
+    await POST(postRequest(validPayload({ submissionId: "sub-002" })));
+
+    const records = await inboxLines();
+    expect(records.map((entry) => entry.submissionId)).toEqual(["sub-001", "sub-002"]);
+    expect(new Set(records.map((entry) => entry.receiptId)).size).toBe(2);
+  });
+
+  it("stores one line when the same submissionId arrives concurrently", async () => {
+    const responses = await Promise.all([
+      POST(postRequest(validPayload())),
+      POST(postRequest(validPayload())),
+      POST(postRequest(validPayload())),
+    ]);
+
+    const records = await inboxLines();
+    expect(records).toHaveLength(1);
+
+    const bodies = await Promise.all(
+      responses.map((response) => response.json() as Promise<{ receiptId: string }>),
+    );
+    // Every caller was told the same receipt - the one that is actually on disk.
+    expect(new Set(bodies.map((body) => body.receiptId))).toEqual(
+      new Set([records[0].receiptId]),
+    );
+  });
+
   it("refuses a body it is told is oversized without reading it at all", async () => {
     const request = postRequest(validPayload(), {
       "content-length": String(MAX_BODY_BYTES + 1),
@@ -146,7 +297,7 @@ describe("POST /api/inbox/submissions", () => {
     // The point of the guard: the body was never consumed, so its size never
     // mattered to this instance's memory.
     expect(request.bodyUsed).toBe(false);
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("refuses an oversized body that declares no length at all", async () => {
@@ -163,48 +314,69 @@ describe("POST /api/inbox/submissions", () => {
     const response = await POST(
       new Request(ENDPOINT, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: sessionCookie },
         body: oversized,
       }),
     );
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("rejects a body that is not declared as JSON", async () => {
     const response = await POST(postRequest(validPayload(), { "content-type": "text/plain" }));
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
+  });
+
+  it("rejects a body whose bytes are not valid UTF-8", async () => {
+    // A lone continuation byte: strict decoding must refuse it rather than replace it,
+    // because the submitted text has to survive byte for byte or not at all.
+    const invalid = new Uint8Array([0x7b, 0x22, 0x80, 0x22, 0x7d]);
+
+    const response = await POST(
+      new Request(ENDPOINT, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(invalid.byteLength),
+          cookie: sessionCookie,
+        },
+        body: invalid,
+      }),
+    );
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
   });
 
   it("rejects a createdAt that is not a real instant", async () => {
     const response = await POST(postRequest(validPayload({ createdAt: "hello" })));
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("rejects a whitespace-only answer without acknowledging it", async () => {
     const response = await POST(postRequest(validPayload({ originalText: "   " })));
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("rejects a malformed request body without acknowledging it", async () => {
     const response = await POST(postRequest("{ this is not json"));
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("rejects an oversized answer without acknowledging it", async () => {
     const response = await POST(postRequest(validPayload({ originalText: "a".repeat(4001) })));
 
     await expectRefusal(response, 400, "invalid-payload");
-    await expect(inboxLines()).rejects.toThrow();
+    await expectNothingStored();
   });
 
   it("still stores submissions when the inbox directory is configured but empty", async () => {
