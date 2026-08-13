@@ -61,8 +61,14 @@ export function describeSubmissionInboxStoreContract(
 
     it("keeps distinct submissionIds apart", async () => {
       const store = await createStore();
-      await store.appendIfAbsent(inboxRecord({ submissionId: "sub-a" }));
-      await expect(store.appendIfAbsent(inboxRecord({ submissionId: "sub-b" }))).resolves.toEqual({
+      // A receipt each, as the route mints one per submission. Two records sharing a
+      // receipt is not a state any store has to hold - the MCL-48 schema forbids it
+      // outright, because a receipt a child is told their answer arrived under must
+      // point at one submission and not two.
+      await store.appendIfAbsent(inboxRecord({ submissionId: "sub-a", receiptId: "receipt-a" }));
+      await expect(
+        store.appendIfAbsent(inboxRecord({ submissionId: "sub-b", receiptId: "receipt-b" })),
+      ).resolves.toEqual({
         stored: true,
       });
     });

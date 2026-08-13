@@ -204,6 +204,19 @@ describe("POST /api/inbox/submissions", () => {
     });
   });
 
+  it("mints receivedAt in the one canonical ISO shape", async () => {
+    const response = await POST(postRequest(validPayload()));
+
+    const body = (await response.json()) as { receivedAt: string };
+    // Not decoration: a retry is answered with the receivedAt the store handed back,
+    // and the PostgreSQL store of MCL-48 reads it out of a timestamptz as
+    // Date.toISOString(). The two match only while this route mints exactly that shape,
+    // and that invariant otherwise spans two files with nothing connecting them - so a
+    // change here to, say, a value with an offset would break the ACK a child already
+    // holds, silently and only on the retry path.
+    expect(body.receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
   it("issues its own receipt and ignores one the client tried to dictate", async () => {
     const forged = { receiptId: "forged-receipt", receivedAt: "1999-01-01T00:00:00.000Z" };
 
