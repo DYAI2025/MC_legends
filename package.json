@@ -19,18 +19,21 @@
     "test:e2e": "playwright test",
     "test:architecture": "vitest run tests/architecture",
     "check:foundation": "node scripts/check-foundation.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
     "verify": "npm run check:foundation && npm run check:secrets && npm run lint && npm run typecheck && npm run test && npm run build",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:client-secrets": "node scripts/check-client-secrets.mjs"
   },
   "dependencies": {
     "next": "16.3.0",
+    "pg": "8.16.3",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",
     "@types/node": "24.13.3",
+    "@types/pg": "8.15.6",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.5",
