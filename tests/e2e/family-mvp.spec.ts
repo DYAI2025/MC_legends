@@ -9,6 +9,16 @@ import {
 import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
 import { createTextSubmission, submissionStatusLabel } from "@/domain/submissions/submission";
 import { expectChildSafe } from "../support/child-safe";
+import { signInAsFamily } from "../support/family-session";
+
+/**
+ * Writing is behind the family gate since MCL-34, so every test that reaches the
+ * answer form has to hold a session first. Signed in through the real endpoint, so
+ * these tests exercise the protected path rather than a bypass.
+ */
+test.beforeEach(async ({ page }) => {
+  await signInAsFamily(page);
+});
 
 const removedDemoStrings = [
   "Das Tor ins grüne Tal",

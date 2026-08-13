@@ -15,7 +15,28 @@ export type InboxRecord = Readonly<{
   originalText: string;
 }>;
 
-/** Server-side persistence boundary for the family project inbox. */
+/**
+ * What one delivery attempt did to the store.
+ *
+ * `stored: false` is not a failure: it is the answer to a retry of a submissionId the
+ * store already holds, and it carries the record that was kept so the caller can reply
+ * with the receipt that submission already has. Without the existing record here, a
+ * retry would either mint a second contradictory receipt or have to be refused - and a
+ * refusal would leave a child's answer looking undelivered when it arrived long ago.
+ */
+export type AppendOutcome =
+  | Readonly<{ stored: true }>
+  | Readonly<{ stored: false; existing: InboxRecord }>;
+
+/**
+ * Server-side persistence boundary for the family project inbox.
+ *
+ * `appendIfAbsent` rather than `append` so idempotency is a property of the boundary
+ * and not of one adapter's implementation: the file adapter enforces it by scanning
+ * what it wrote, and the PostgreSQL adapter of MCL-48 is expected to enforce it with a
+ * unique constraint on submissionId. Both satisfy the same contract, so the route does
+ * not change when the store does.
+ */
 export interface SubmissionInboxStore {
-  append(record: InboxRecord): Promise<void>;
+  appendIfAbsent(record: InboxRecord): Promise<AppendOutcome>;
 }
