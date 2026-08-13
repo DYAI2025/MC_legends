@@ -4,7 +4,10 @@ import {
   closePostgresSubmissionInboxPools,
   PostgresSubmissionInboxStore,
 } from "@/adapters/persistence/postgres-submission-inbox-store";
-import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
+import {
+  SubmissionPayloadError,
+  type SubmissionInboxStore,
+} from "@/application/submissions/submission-inbox-store";
 import {
   describeSubmissionInboxStoreContract,
   inboxRecord,
@@ -67,12 +70,21 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
   it("stores exactly one row when the same submissionId is appended concurrently", async () => {
     const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
 
-    // Two receipts, because the route mints a fresh one per request: the loser is a
+    // More callers than the pool has connections (max: 10), so the losers genuinely
+    // queue behind the winner's INSERT and take the lock-wait path. Two callers on a
+    // warm pool may never overlap at all, which proves the outcome without ever
+    // exercising the mechanism that produces it.
+    const CALLERS = 24;
+
+    // A receipt each, because the route mints a fresh one per request: every loser is a
     // genuinely different record that must still not be written.
-    const outcomes = await Promise.all([
-      store.appendIfAbsent(inboxRecord({ submissionId: "sub-race", receiptId: "receipt-race-1" })),
-      store.appendIfAbsent(inboxRecord({ submissionId: "sub-race", receiptId: "receipt-race-2" })),
-    ]);
+    const outcomes = await Promise.all(
+      Array.from({ length: CALLERS }, (_ignored, index) =>
+        store.appendIfAbsent(
+          inboxRecord({ submissionId: "sub-race", receiptId: `receipt-race-${index}` }),
+        ),
+      ),
+    );
 
     expect(outcomes.filter((outcome) => outcome.stored)).toHaveLength(1);
 
@@ -82,9 +94,103 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
     );
     expect(rows).toHaveLength(1);
 
-    // And the loser was handed the receipt that is actually in the table, not its own.
-    const loser = outcomes.find((outcome) => !outcome.stored);
-    expect(loser?.stored === false && loser.existing.receiptId).toBe(rows[0].receipt_id);
+    // And every loser was handed the receipt that is actually in the table, not its own.
+    const losers = outcomes.filter((outcome) => !outcome.stored);
+    expect(losers).toHaveLength(CALLERS - 1);
+    for (const loser of losers) {
+      expect(loser.stored === false && loser.existing.receiptId).toBe(rows[0].receipt_id);
+    }
+  });
+
+  it("shares one pool across store instances built from the same connection string", async () => {
+    // Its own application_name, so this case gets its own pool key and its own
+    // countable backends: the pools the rest of the file uses are keyed by the plain
+    // connection string and stay out of the count.
+    const applicationName = "mcl48-pool-ownership";
+    const separator = CONNECTION_STRING.includes("?") ? "&" : "?";
+    const connectionString = `${CONNECTION_STRING}${separator}application_name=${applicationName}`;
+
+    // The composition root builds a store per request, which is exactly the shape this
+    // has to survive.
+    for (const index of [0, 1, 2]) {
+      const store = new PostgresSubmissionInboxStore(connectionString);
+      await store.appendIfAbsent(
+        inboxRecord({ submissionId: `sub-pool-${index}`, receiptId: `receipt-pool-${index}` }),
+      );
+    }
+
+    const { rows } = await inspect().query<{ backends: string }>(
+      `SELECT count(*)::text AS backends
+         FROM pg_stat_activity
+        WHERE datname = current_database() AND application_name = $1`,
+      [applicationName],
+    );
+
+    // One, not three. Without the cache every submission opens a TCP connection and an
+    // auth handshake of its own - and orphans the pool before it, each holding its
+    // socket until idleTimeoutMillis. Nothing notices until max_connections does.
+    expect(rows[0].backends).toBe("1");
+  });
+
+  it("rejects rather than acknowledging a row that was neither inserted nor found", async () => {
+    const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+
+    // A BEFORE INSERT trigger returning NULL suppresses the row without raising: the
+    // INSERT affects 0 rows with no conflict, so the follow-up SELECT finds nothing
+    // either. That is the one state in which answering `stored: true` would hand a child
+    // a receipt for a submission the database does not hold - worse than an outage,
+    // because an outage is visible and this is not.
+    await inspect().query(`
+      CREATE OR REPLACE FUNCTION suppress_ins() RETURNS trigger
+        AS $fn$ BEGIN RETURN NULL; END $fn$ LANGUAGE plpgsql;
+    `);
+    await inspect().query(`
+      CREATE TRIGGER suppress_ins_t BEFORE INSERT ON submission_inbox
+        FOR EACH ROW EXECUTE FUNCTION suppress_ins();
+    `);
+
+    try {
+      await expect(
+        store.appendIfAbsent(inboxRecord({ submissionId: "sub-vanished" })),
+      ).rejects.toThrow(/sub-vanished/);
+
+      const { rows } = await inspect().query(
+        "SELECT 1 FROM submission_inbox WHERE submission_id = $1",
+        ["sub-vanished"],
+      );
+      expect(rows).toHaveLength(0);
+    } finally {
+      await inspect().query("DROP TRIGGER IF EXISTS suppress_ins_t ON submission_inbox");
+      await inspect().query("DROP FUNCTION IF EXISTS suppress_ins()");
+    }
+  });
+
+  it("reports a check violation as a payload error rather than an outage", async () => {
+    const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+
+    // Past submission_inbox_original_text_length. The route caps this too, but the
+    // route is not the only writer this table will ever have, and the point is the
+    // class rather than this one payload: anything the database refuses for what it
+    // *is* must reach the caller as "unstorable", never as "unavailable", or the child
+    // retries an unchanged submission against a permanent 503.
+    await expect(
+      store.appendIfAbsent(
+        inboxRecord({ submissionId: "sub-too-long", originalText: "a".repeat(4001) }),
+      ),
+    ).rejects.toBeInstanceOf(SubmissionPayloadError);
+  });
+
+  it("reports a data exception as a payload error rather than an outage", async () => {
+    const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+
+    // 22021: PostgreSQL's UTF8 encoding cannot hold a NUL. The route now refuses this
+    // before it can ever get here; this pins what happens the day something else does
+    // not.
+    await expect(
+      store.appendIfAbsent(
+        inboxRecord({ submissionId: "sub-nul", originalText: "drache\u0000ende" }),
+      ),
+    ).rejects.toBeInstanceOf(SubmissionPayloadError);
   });
 
   it("rejects when the database cannot be reached instead of resolving", async () => {
@@ -95,6 +201,13 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
     await expect(
       store.appendIfAbsent(inboxRecord({ submissionId: "sub-unreachable" })),
     ).rejects.toThrow();
+
+    // And not as a payload error. An unreachable database is an outage the route must
+    // keep answering 503 for; classifying too widely would tell a child their answer is
+    // invalid every time the database blinks, and no retry would ever fix it.
+    await expect(
+      store.appendIfAbsent(inboxRecord({ submissionId: "sub-unreachable" })),
+    ).rejects.not.toBeInstanceOf(SubmissionPayloadError);
   });
 
   /**

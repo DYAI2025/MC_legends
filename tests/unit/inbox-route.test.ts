@@ -371,6 +371,55 @@ describe("POST /api/inbox/submissions", () => {
     await expectNothingStored();
   });
 
+  it("rejects a createdAt in a year the store cannot hold", async () => {
+    // Not exotic: an uninitialised field or a buggy date picker produces it. Date.parse
+    // reads it happily, and PostgreSQL refuses it forever because it has no year zero -
+    // so without this guard the child is told the inbox is down, on every retry of a
+    // payload that never changes.
+    const response = await POST(postRequest(validPayload({ createdAt: "0000-01-01" })));
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
+  it("still accepts every createdAt spelling the year range must not swallow", async () => {
+    // The guard above is a range check bolted onto Date.parse, and the cheapest way to
+    // get it wrong is to over-reject. These four are what the store's own cases already
+    // rely on being accepted.
+    for (const createdAt of ["2026", "2026-08", "2026-08-14", "2026-08-14T09:00:00.000Z"]) {
+      const response = await POST(
+        postRequest(validPayload({ createdAt, submissionId: `sub-${createdAt}` })),
+      );
+
+      expect(response.status, `createdAt ${createdAt} must still be accepted`).toBe(201);
+    }
+  });
+
+  it("rejects a NUL in the answer without acknowledging it", async () => {
+    // Legal JSON as an escape, so it survives the strict UTF-8 decode; not whitespace,
+    // so it survives trim(); one character, so it is under every cap. PostgreSQL then
+    // refuses it permanently (22021).
+    const response = await POST(
+      postRequest(validPayload({ originalText: "drache\u0000ende" })),
+    );
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
+  it("rejects a lone surrogate in the answer instead of storing a repaired version", async () => {
+    // node-postgres encodes parameters with Buffer.from(str, "utf8"), which rewrites an
+    // unpaired surrogate to U+FFFD - so accepting this would store text that is not the
+    // text the child sent. Refused, never repaired: the original has to survive byte
+    // for byte or not at all.
+    const response = await POST(
+      postRequest(validPayload({ originalText: "drache\ud83dende" })),
+    );
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
   it("rejects a whitespace-only answer without acknowledging it", async () => {
     const response = await POST(postRequest(validPayload({ originalText: "   " })));
 
