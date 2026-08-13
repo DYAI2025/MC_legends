@@ -24,26 +24,75 @@ This is not only about MCL-48. The `gbrain` database (44 MB), the `AVALORIA_*` s
 every other service on that host are equally unbacked. MCL-48 fixes exactly one slice of
 that — the `mcl` database — and leaves the rest as it found it.
 
-**2. The external target is an OPEN DECISION, not yet confirmed by Benjamin.**
+**2. The external target is DECIDED: this MacBook pulls from the VPS.**
 
-The rest of this document is written against the **recommended default**: the Berlin Linux
-machine (`dyai@100.103.64.33`, reachable over Tailscale) **pulls** dumps from the VPS.
-Reasoning is in "Why pull" below. Confirm or override that choice before implementing any
-of it. Nothing in `docs/deploy/vps-mc-legends.md` depends on the answer.
+Benjamin's decision, 2026-08-14. The app keeps running **exclusively** on
+`srv1308064.hstgr.cloud` (`https://srv1308064.hstgr.cloud:8443/#frage`); there is no second
+host serving it and none is planned here. The backup is pulled **from this MacBook**
+(user `benjaminpoersch`) directly from the VPS over ssh — `ssh root@76.13.130.224`.
+
+The Berlin Linux machine (`dyai@100.103.64.33`), which earlier drafts named as the puller,
+is **switched off** and is therefore not available as a backup host. The *shape* of the
+design is unchanged — it is still a pull, and every argument in "Why pull" below still
+holds unaltered. Only the machine changed.
+
+One property the Berlin box had and this one does not: it was always on. A laptop is not.
+That is handled in §2, honestly and with its cost stated, rather than assumed away.
 
 **3. Jira MCL-48's backup criterion is NOT met by this document.**
 
 The criterion is "backup/restore documented **and validated at least once**, restorable
-off this VPS". Documented is half. It is met when the drill in §4 has actually been run
-and its row is filled in in §5 — not before. The table below deliberately ships with a
+off this VPS". Documented is half. It is met when the drill in §3 has actually been run
+and its row is filled in in §4 — not before. Deciding the target does not move this, and
+neither does merging this file. The table below deliberately ships with a
 single `pending first drill` row so that the gap is visible rather than implied.
+
+---
+
+## The network path — this does **not** go over Tailscale
+
+Written down because the connection was assumed to be a Tailscale link and it is not.
+Verified from this MacBook on 2026-08-14:
+
+```
+$ dig +short srv1308064.hstgr.cloud
+76.13.130.224
+
+$ ssh root@76.13.130.224 'echo $SSH_CONNECTION ...'
+server sees client IP: 79.206.188.35
+server sshd bound:     76.13.130.224
+
+$ tailscale status | grep -i srv1308064
+100.115.155.7  srv1308064-1   DYAI2025@  linux  offline, last seen 12d ago
+100.65.173.89  srv1308064     DYAI2025@  linux  offline, last seen 192d ago
+```
+
+`76.13.130.224` is the VPS's **public** IP — it is the A record for
+`srv1308064.hstgr.cloud`, and it is not inside Tailscale's `100.64.0.0/10` range. The
+VPS's two Tailscale nodes are **both offline** (last seen 12 days and 192 days ago). The
+ssh that works goes over the public internet to port 22, which ufw already allows.
+
+Three reasons this matters:
+
+1. **The dump crosses the public internet.** ssh encrypts it in transit, so this is
+   acceptable and the design stands. But "encrypted end to end over the public internet"
+   is a different statement from "it never leaves a private network", and this document
+   does not claim the latter.
+2. **Nobody should go looking for a Tailscale link that is not carrying this traffic.** A
+   future reader debugging a failed pull would otherwise spend time on a layer that is not
+   involved.
+3. **If the VPS's Tailscale node is ever brought back online, pointing the pull at the
+   `100.x` address is a one-line change** — the `VPS=` line in the script below — and it
+   would be a genuine improvement: the dump would leave the public internet entirely, and
+   port 22 could then be closed to the world. Worth doing if the node comes back. Not a
+   requirement; the backup is correct without it.
 
 ---
 
 ## Why pull, not push
 
-The Berlin machine opens an ssh connection to the VPS, runs `pg_dump` there, and writes
-the output to its own disk. The VPS never initiates anything.
+This MacBook opens an ssh connection to the VPS, runs `pg_dump` there, and writes the
+output to its own disk. The VPS never initiates anything.
 
 That direction is the whole security argument:
 
@@ -55,20 +104,24 @@ That direction is the whole security argument:
   backups it could: whatever credential lets the VPS write to the destination also lets an
   attacker on the VPS overwrite or erase what is stored there. Ransomware relies on
   exactly that. Pull inverts it.
-- **No secret travels in either direction.** Only the dump crosses the wire, over ssh,
-  over Tailscale. The `mcl_app` password stays in `/opt/mc-legends/app.env` and is never
-  needed here — `pg_dump` runs on the VPS as the `postgres` peer-authenticated OS user.
+- **No secret travels in either direction.** Only the dump crosses the wire, inside ssh —
+  over the public internet, as recorded above. The `mcl_app` password stays in
+  `/opt/mc-legends/app.env` and is never needed here: `pg_dump` runs on the VPS as the
+  `postgres` peer-authenticated OS user.
 
-The cost is that the Berlin machine must be up when the timer fires. For a family project
-whose data is a few kilobytes of text, that is the right trade.
+The cost is that this MacBook must be awake and online when the schedule fires. On a
+laptop that is not always true — see §2. For a family project whose data is a few
+kilobytes of text, that is still the right trade.
 
 ---
 
-## 1. The pull script (runs on the Berlin machine)
+## 1. The pull script (runs on this MacBook)
 
-Not yet installed — this is the artefact to create once the target is confirmed.
+Not yet installed — this is the artefact to create.
 
-Place at `~/bin/mcl-backup.sh` on `dyai@100.103.64.33`, mode `0700`.
+Place at `~/bin/mcl-backup.sh` on this machine (user `benjaminpoersch`), mode `0700`.
+Dumps go to `~/Backups/mc-legends` — outside the repository and outside `Downloads`, both
+of which get cleaned out.
 
 ```bash
 #!/usr/bin/env bash
@@ -77,8 +130,14 @@ Place at `~/bin/mcl-backup.sh` on `dyai@100.103.64.33`, mode `0700`.
 # no inbound port, so a compromised VPS cannot reach or delete these copies.
 set -euo pipefail
 
-VPS="root@srv1308064.hstgr.cloud"
-DEST="$HOME/backups/mc-legends"
+# launchd starts jobs with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that contains no
+# Homebrew. Set it explicitly, or the job works by hand and fails only when it runs
+# unattended - the worst possible moment to find out. Must be PostgreSQL >= 17: see the
+# version blocker below.
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+
+VPS="root@srv1308064.hstgr.cloud"   # public DNS -> 76.13.130.224, plain internet, not Tailscale
+DEST="$HOME/Backups/mc-legends"
 KEEP_DAYS=90
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DUMP="$DEST/mcl-$STAMP.dump"
@@ -89,7 +148,10 @@ mkdir -p "$DEST"
 # restore selectively from it - which is what makes the verification below possible.
 # --no-owner so the dump can be restored into a scratch database owned by whoever is
 # running the drill, without needing an mcl_app role to exist on the restoring machine.
-ssh "$VPS" "sudo -u postgres pg_dump --format=custom --no-owner --dbname=mcl" > "$DUMP"
+# BatchMode=yes so an unattended run fails immediately instead of hanging forever on a
+# passphrase or host-key prompt that nobody is sitting there to answer.
+ssh -o BatchMode=yes "$VPS" \
+  "sudo -u postgres pg_dump --format=custom --no-owner --dbname=mcl" > "$DUMP"
 
 # Verify at BACKUP time, not during an incident. A dump that pg_restore cannot list is
 # not a backup - it is a file. This catches a truncated transfer, a half-written dump and
@@ -113,7 +175,7 @@ fi
 find "$DEST" -name 'mcl-*.dump' -mtime "+$KEEP_DAYS" -delete
 find "$DEST" -name 'mcl-*.dump.toc' -mtime "+$KEEP_DAYS" -delete
 
-echo "ok: $DUMP ($(stat -c %s "$DUMP") bytes)"
+echo "ok: $(date -u +%FT%TZ) $DUMP ($(stat -f %z "$DUMP") bytes)"
 ```
 
 Notes on the choices:
@@ -126,65 +188,147 @@ Notes on the choices:
   wherever that role does not exist.
 - The failed dump is renamed `.corrupt` rather than deleted, so there is something to look
   at afterwards, and so the next run does not silently overwrite the evidence.
-- `stat -c %s` is GNU `stat` (Linux). On macOS it is `stat -f %z`.
+- `stat -f %z` is BSD/macOS `stat`. On Linux the same thing is `stat -c %s` — the earlier
+  Berlin-targeted draft used the Linux spelling; this one runs on macOS.
+- The timestamped filename means every run produces a new file and no run ever overwrites
+  a previous good dump.
 
-> **TODO before first use:** confirm that `root@srv1308064.hstgr.cloud` is reachable from
-> the Berlin machine over Tailscale with key-based ssh and no passphrase prompt — a key
-> with a passphrase cannot be used from a timer. Confirm `pg_dump` on the VPS is version
-> 17.x (it must be ≥ the server's 17.10) and that the Berlin machine's `pg_restore` is
-> also ≥ 17, since a newer custom-format dump cannot be read by an older `pg_restore`.
+### Blocker: this Mac's PostgreSQL client tools are too old
+
+The VPS runs **PostgreSQL 17.10**. This Mac currently has **PostgreSQL 15.18** via
+Homebrew (`/opt/homebrew/opt/postgresql@15/bin`, `pg_restore (PostgreSQL) 15.18`).
+
+**`pg_restore` 15 cannot read a custom-format dump written by `pg_dump` 17** — it rejects
+the archive header outright. That breaks two things, not one:
+
+- the `pg_restore --list` verification inside the script above, so the pull script would
+  fail on every run and quarantine every dump as `.corrupt`; and
+- the restore drill in §3, which is the thing that actually closes the Jira criterion.
+
+Fix before the first real run — either:
+
+- `brew install postgresql@17` on this Mac (the formula ships both the client tools and a
+  server, which the drill also needs), then keep the explicit
+  `/opt/homebrew/opt/postgresql@17/bin` PATH line in the script; or
+- run the drill on some other machine that already has PostgreSQL ≥ 17.
+
+Installing `postgresql@17` alongside `postgresql@15` is fine — neither formula is linked
+into the PATH by default, which is exactly why the script names the directory explicitly
+instead of trusting whatever `pg_restore` the shell finds.
+
+> **TODO before first use, in this order:**
+>
+> 1. Install PostgreSQL ≥ 17 client tools (above) and confirm
+>    `/opt/homebrew/opt/postgresql@17/bin/pg_restore --version` reports 17.x.
+> 2. Confirm the ssh key this Mac uses for `root@srv1308064.hstgr.cloud` has **no
+>    passphrase**, i.e. that `ssh -o BatchMode=yes root@srv1308064.hstgr.cloud true`
+>    succeeds. A key that only works because an `ssh-agent` is unlocked in an interactive
+>    shell will not work from a launchd job, which does not inherit that session reliably.
+> 3. Confirm `pg_dump` **on the VPS** is 17.x (`sudo -u postgres pg_dump --version`). It
+>    must be ≥ the server's 17.10. Expected to be, since it comes from the same server
+>    package — but not verified, so check rather than assume.
+> 4. Confirm whether a local PostgreSQL **server** is running on this Mac and on which
+>    port. Only the 15.x client binaries were observed; whether anything is listening is
+>    unknown. §3 needs a server ≥ 17 to `createdb` into.
 
 ---
 
-## 2. Scheduling (systemd timer on the Berlin machine)
+## 2. Scheduling (launchd `LaunchAgent` on this MacBook)
 
-A timer, not cron: a timer records the last run, survives a machine that was asleep at the
-scheduled minute (`Persistent=true`), and its failures land in the journal instead of in
-root's mail spool.
+macOS has no systemd. The per-user equivalent of a timer is a `LaunchAgent` plist under
+`~/Library/LaunchAgents/`.
 
-`~/.config/systemd/user/mcl-backup.service`:
+`~/Library/LaunchAgents/com.dyai.mcl-backup.plist`:
 
-```ini
-[Unit]
-Description=Pull a PostgreSQL dump of the MC Legends inbox from the VPS
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dyai.mcl-backup</string>
 
-[Service]
-Type=oneshot
-ExecStart=%h/bin/mcl-backup.sh
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/benjaminpoersch/bin/mcl-backup.sh</string>
+  </array>
+
+  <!-- Daily at 13:00 local time. If the Mac is asleep at 13:00, launchd runs the job
+       when it next wakes. If the Mac was powered OFF, the missed calendar run is not
+       made up - RunAtLoad below is what covers that case. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>   <integer>13</integer>
+    <key>Minute</key> <integer>0</integer>
+  </dict>
+
+  <!-- Runs the job when the agent is loaded, i.e. at every login. Together with the
+       calendar entry this is what makes a missed window get caught the next time the
+       machine is actually awake, instead of skipped until tomorrow. -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- There is no journal on macOS. Keep stdout and stderr somewhere readable. -->
+  <key>StandardOutPath</key>
+  <string>/Users/benjaminpoersch/Backups/mc-legends/backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/benjaminpoersch/Backups/mc-legends/backup.log</string>
+</dict>
+</plist>
 ```
 
-`~/.config/systemd/user/mcl-backup.timer`:
+launchd does **not** expand `~` inside a plist — the absolute paths above are deliberate,
+and the `$HOME`-relative paths in the script are fine because the script is a shell.
 
-```ini
-[Unit]
-Description=Daily MC Legends inbox backup
-
-[Timer]
-OnCalendar=daily
-RandomizedDelaySec=30m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
+Load it, and prove it can run rather than assuming:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now mcl-backup.timer
-loginctl enable-linger dyai        # so the timer runs without an active login session
-systemctl --user list-timers mcl-backup.timer
+mkdir -p ~/Backups/mc-legends
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dyai.mcl-backup.plist
+launchctl kickstart -p gui/$(id -u)/com.dyai.mcl-backup   # run it once now, deliberately
+launchctl print gui/$(id -u)/com.dyai.mcl-backup | head -20
+tail -20 ~/Backups/mc-legends/backup.log
 ```
 
-Check it is actually running, rather than assuming:
+(To remove or reload it: `launchctl bootout gui/$(id -u)/com.dyai.mcl-backup`. The older
+`launchctl load`/`unload` spelling still works but is deprecated.)
+
+The cost of `RunAtLoad` is a handful of extra dumps on days with several logins. They are
+timestamped, a few kilobytes each, and pruned after `KEEP_DAYS`. Trading a little disk for
+"the machine backs up soon after it is awake" is the right way round.
+
+### A missed window is normal on a laptop, not a fault
+
+The Berlin box was always on. **This one is not.** A scheduled pull on a MacBook is
+best-effort by nature: it does not run while the lid is shut, while the machine is asleep,
+while it is powered off, or while it is off the network. Nothing here changes that, and a
+skipped day is expected behaviour rather than something to debug.
+
+What that costs is stated in §5: the worst-case data loss is everything submitted since
+the last successful pull, and on a laptop that gap can be longer than 24 hours.
+
+### Telling "no backup ran" apart from "backups are fine"
+
+Because the runs are irregular, "when did it last succeed?" cannot be answered by looking
+at a schedule. Look at the newest dump instead:
 
 ```bash
-systemctl --user status mcl-backup.service     # expect the last run to have succeeded
-journalctl --user -u mcl-backup.service -n 20
-ls -lt ~/backups/mc-legends | head
+f=$(ls -t ~/Backups/mc-legends/mcl-*.dump 2>/dev/null | head -1); \
+[ -n "$f" ] && echo "$(basename "$f") — $(( ($(date +%s) - $(stat -f %m "$f")) / 3600 ))h old" \
+            || echo "NO DUMPS AT ALL"
 ```
 
-A timer whose last successful run is older than two days is an incident, not a nit. There
-is no alerting for that yet — see the "does not cover" list.
+Worth an alias. How to read it:
+
+- **A few hours to ~2 days old** — normal. The laptop has been used and the job has run.
+- **Older than about a week** — the schedule is not firing, or the script is failing every
+  time. Read `~/Backups/mc-legends/backup.log` and look for `.corrupt` files in the dump
+  directory, then run `launchctl kickstart` by hand and watch it.
+- **`NO DUMPS AT ALL`** — nothing has ever worked. Go back to the TODO list in §1.
+
+That is the whole check. There is deliberately no monitoring system here; see the
+"does not cover" list.
 
 ---
 
@@ -198,10 +342,18 @@ objects, and a restore of a stale dump over live data destroys every submission 
 since that dump was taken. The drill exists to prove the dump is good, not to overwrite
 anything.
 
-Run on the Berlin machine, against its own local PostgreSQL. Nothing here touches the VPS.
+Run on this MacBook, against its own local PostgreSQL. Only the two source-count queries
+at the end touch the VPS, and they are read-only.
+
+**This drill cannot be run on this machine yet.** It needs `pg_restore` **and** a
+PostgreSQL server of version ≥ 17 locally, because the dump comes from a 17.10 server; the
+Mac has 15.18. See the blocker in §1. Install `postgresql@17` (and start it) or run the
+drill elsewhere — do not work around it by downgrading the dump format.
 
 ```bash
-DUMP=~/backups/mc-legends/mcl-<stamp>.dump
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"   # >= 17, see §1
+
+DUMP=~/Backups/mc-legends/mcl-<stamp>.dump
 SCRATCH=mcl_drill_$(date -u +%Y%m%d)
 
 # 1. Create the scratch database
@@ -231,8 +383,8 @@ differ from the source's is a dump that would restore a different schema than th
 expects.
 
 **Fail condition.** Anything else. A failed drill means the backup does not work, whatever
-the timer's exit code has been saying — record it in the table below and fix it before
-calling the criterion met.
+the scheduled job's exit code has been saying — record it in the table below and fix it
+before calling the criterion met.
 
 Do the drill on a **freshly pulled dump**, not on one you have already used. The thing
 being tested is the pipeline, not one file.
@@ -258,9 +410,11 @@ row — not when this document is merged.
 Stated so nobody assumes coverage that does not exist.
 
 - **Point-in-time recovery.** There is **no WAL archiving** and none is configured here.
-  The recovery granularity is one daily dump, so the worst-case data loss is everything
-  submitted since the last successful pull — up to 24 hours. For a family project that is
-  an accepted trade; it is not a property to discover during an incident. Adding PITR
+  The recovery granularity is one dump per successful run, so the worst-case data loss is
+  everything submitted since the last successful pull. With the puller being a laptop that
+  is **not bounded by 24 hours** — it is however long the machine was asleep, off, or off
+  the network (§2). For a family project that is an accepted trade; it is not a property
+  to discover during an incident. Adding PITR
   means `archive_mode`, an archive destination and a base backup, and it would apply to
   the whole server including `gbrain` — a separate decision, not a footnote to this one.
 - **The `AVALORIA_*` secrets.** `/opt/mc-legends/app.env` holds the family access code,
@@ -276,6 +430,11 @@ Stated so nobody assumes coverage that does not exist.
 - **Every other service on the VPS.** `gbrain`, `openwa-postgres`, `whatsapp-brain`,
   `lpam-frontend-1`, `qdrant`, nginx configuration, Let's Encrypt certificates. All still
   unbacked, all out of MCL-48's scope, all deliberately untouched by this work.
-- **Alerting.** Nothing notifies anyone when the timer stops running or a dump fails
-  verification. The only current check is a human reading `systemctl --user list-timers`.
-  Worth its own ticket once the target is confirmed.
+- **Alerting.** Nothing notifies anyone when the schedule stops firing or a dump fails
+  verification. The only current check is a human running the dump-age one-liner in §2 and
+  reading `~/Backups/mc-legends/backup.log`. Worth its own ticket. It matters more here
+  than it would have on an always-on machine, because on a laptop "no run today" is
+  indistinguishable from "broken" without looking.
+- **A second copy of the dumps.** Everything lives on one laptop's disk. That is already
+  strictly better than today (where it lives only on the VPS), but a lost or stolen
+  MacBook loses the backups. An encrypted off-machine copy is a separate decision.
