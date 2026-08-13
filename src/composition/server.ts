@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { HmacFamilyAccessGate } from "@/adapters/access/hmac-family-access-gate";
 import { InMemoryRateLimiter } from "@/adapters/access/in-memory-rate-limiter";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
+import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-submission-inbox-store";
 import type { FamilyAccessGate } from "@/application/access/family-access";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
@@ -15,17 +16,52 @@ const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
  * architecture test pins that.
  *
  * A store is built per request. That is right for an append-only file, which holds no
- * connection: a later database adapter must own its own pool internally rather than
- * being constructed per call from here.
+ * connection, and it stays right for the PostgreSQL adapter: that adapter caches its
+ * pool in a module-level Map keyed by connection string, so a store per request costs
+ * an object and not a TCP connection.
  *
  * `||` rather than `??` on purpose: a host UI that defines AVALORIA_INBOX_DIR and
  * leaves it empty would otherwise hand `mkdir` an empty path, and every submission
  * would fail with 503 while the site and its health check still look fine.
  */
 export function createSubmissionInboxStore(): SubmissionInboxStore {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresSubmissionInboxStore(url);
+  }
+
+  // Not a default and not dead code: this is MCL-48's rollback path, and it must stay
+  // reachable. Removing the DATABASE_URL line from app.env and restarting returns the
+  // app to the file store with the bind-mounted JSONL still in place - no code revert,
+  // no redeploy of a different image, no schema drop. Rows already in PostgreSQL stay
+  // in PostgreSQL.
   return new FileSubmissionInboxStore(
     process.env.AVALORIA_INBOX_DIR?.trim() || DEFAULT_INBOX_DIRECTORY,
   );
+}
+
+/**
+ * The database connection string, or null when none is configured.
+ *
+ * Named here and nowhere else in src, which is what keeps the architecture rule intact:
+ * this module is the only one allowed to read the environment, and an architecture test
+ * pins that. The PostgreSQL adapter therefore takes its connection string as a
+ * constructor argument, exactly as the file adapter takes its directory.
+ *
+ * `||` rather than `??`, for the same reason AVALORIA_INBOX_DIR uses it above: a host
+ * that defines DATABASE_URL and leaves it empty has not configured a database. Treating
+ * that as configured would hand the adapter an empty connection string, and pg would
+ * quietly fall back to its own PG* environment defaults - a different database than
+ * anyone chose, or none at all, with every submission failing 503 while the site and
+ * /api/health both still look fine.
+ *
+ * Read per call rather than captured at module load, so a test can configure the
+ * environment per case and a deployment that injects the variable late is seen without
+ * a fresh module registry.
+ */
+export function databaseUrl(): string | null {
+  return process.env.DATABASE_URL?.trim() || null;
 }
 
 export function createReceiptId(): string {
