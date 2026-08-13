@@ -250,18 +250,64 @@ Tag with the short SHA, matching the existing convention (`mc-legends:0bcec9b1`)
 the old image — it is part of the rollback story if the new one turns out not to start at
 all.
 
-### 6.2 Apply the migrations, before the new container is started
+### 6.2 Apply the migrations — inside the container, not on the host
 
 The schema must exist before anything serves traffic against it. The runner
 (`scripts/migrate.mjs`) applies each pending file in `db/migrations/` in filename order,
 each in one transaction together with its `schema_migrations` row, under a
 `pg_advisory_lock` so two runs cannot race. It refuses to start without `DATABASE_URL`.
 
+**Do not run it from the host checkout.** Measured on the VPS on 2026-08-13:
+
+| Where | Node | npm |
+|---|---|---|
+| Host PATH | **v22.22.2** | 10.9.7 |
+| Inside container `mc-legends` | **v24.19.0** | — |
+
+`package.json` pins `"engines": { "node": ">=24.18.1 <25", "npm": ">=11.16.0 <12" }`. The
+host's v22.22.2 fails that check, so `npm ci` in `/opt/mc-legends/src-checkout` refuses to
+run. The container's v24.19.0 satisfies it. Everything below therefore goes through
+`docker exec`.
+
+This has an **ordering consequence, and it is deliberate**: the container must be rebuilt
+and started (§8) **before** the migrations can be applied. For that window the app is up
+against a database whose `submission_inbox` table does not exist yet. That is safe and it
+is not silent: the store throws, `POST /api/inbox/submissions` answers
+**`503 inbox-unavailable`**, and no submission is accepted-then-lost. Keep the window
+short, and do not run §9.2 until this section is done.
+
+So: build (§6.1) → start the container (§8) → return here.
+
+#### Verify the rebuilt image before migrating
+
+The **currently running** image (`mc-legends:0bcec9b1`) predates this branch: it has
+neither `/app/db/migrations` nor `/app/node_modules/pg`, because neither existed at the
+commit it was built from. Both appear only after the rebuild. Check that the rebuild
+actually produced them, rather than discovering it from a migration failure:
+
 ```bash
-cd /opt/mc-legends/src-checkout
-set -a; . /opt/mc-legends/app.env; set +a     # loads DATABASE_URL into this shell only
-npm ci
-npm run db:migrate
+docker exec mc-legends sh -lc 'ls -d /app/db/migrations /app/node_modules/pg && node -v'
+```
+
+Expect both paths listed and `v24.19.0` (or any `24.18.1 <= v < 25`). If either path is
+missing, the image is not the one you think it is — re-check §6.1 before going further.
+
+Why this works, verified on 2026-08-13:
+
+- The image is built by `COPY src-checkout/ ./`, and there is **no `.dockerignore` in the
+  build context** (`ls: cannot access '/opt/mc-legends/.dockerignore': No such file or
+  directory`). Nothing is filtered out, so `db/migrations/` and `scripts/` are copied in.
+  `/app/scripts` already exists in the running image, which is the same mechanism observed
+  working.
+- `npm ci` in the Dockerfile installs `pg` as soon as `package.json` carries it — which is
+  what this branch adds.
+- `DATABASE_URL` reaches the container through `--env-file /opt/mc-legends/app.env` (§8),
+  so it is already in the container's environment. Nothing has to be exported by hand.
+
+#### Run it
+
+```bash
+docker exec mc-legends npm run db:migrate
 ```
 
 Expected on a fresh database:
@@ -280,16 +326,6 @@ no pending migrations
 That is the idempotency check, and it is worth the ten seconds: it proves the runner
 recorded what it applied, so a later deploy that re-runs it changes nothing.
 
-> **TODO — verify before the first real run.** The repo pins Node `>=24.18.1 <25`
-> (`package.json` `engines`, `.nvmrc`), and the preflight recorded `v22.22.2` on the
-> host's PATH. `npm ci` will refuse under a mismatched Node. Either install Node 24.18.1
-> on the VPS (nvm or NodeSource) and use it for this step, or run the migration from the
-> built image with the socket mounted:
-> `docker run --rm --env-file /opt/mc-legends/app.env -v /var/run/postgresql:/var/run/postgresql --entrypoint node mc-legends:<short-sha> scripts/migrate.mjs`
-> — **which requires confirming that `scripts/` and `node_modules/pg` are present in the
-> image**; a Next.js standalone build does not necessarily include them. Check
-> (`docker run --rm --entrypoint ls mc-legends:<short-sha> scripts`) before relying on it.
-
 Confirm the table exists and is empty:
 
 ```bash
@@ -304,16 +340,26 @@ sudo -u postgres psql -d mcl -Atc "select version from schema_migrations;"      
 There is exactly **one** line (286 bytes) in `/opt/mc-legends/data/inbox/submissions.jsonl`
 — one real answer from a real person. It has to arrive in the new store.
 
+Run this through `docker exec` for the same reason as §6.2 — the importer needs
+`node_modules/pg`, and installing that on the host means `npm ci` under the host's Node
+v22.22.2, which the `engines` pin refuses. Inside the container the driver is already
+installed and `DATABASE_URL` is already in the environment.
+
+The JSONL is visible to the container at `/data/inbox/submissions.jsonl`, because §8
+bind-mounts `/opt/mc-legends/data` to `/data`. Confirm that before importing:
+
 ```bash
-cd /opt/mc-legends/src-checkout
-set -a; . /opt/mc-legends/app.env; set +a
-node scripts/import-inbox-jsonl.mjs /opt/mc-legends/data/inbox/submissions.jsonl
+docker exec mc-legends sh -lc 'wc -c /data/inbox/submissions.jsonl'   # expect 286
+```
+
+```bash
+docker exec mc-legends node scripts/import-inbox-jsonl.mjs /data/inbox/submissions.jsonl
 ```
 
 Expected:
 
 ```
-imported 1, already present 0, of 1 record(s) in /opt/mc-legends/data/inbox/submissions.jsonl
+imported 1, already present 0, of 1 record(s) in /data/inbox/submissions.jsonl
 ```
 
 Properties this relies on, all exercised against a real database before shipping:
@@ -358,11 +404,30 @@ Unchanged and deliberately so: the published address stays `127.0.0.1:3010`, so 
 remains the only way in; the `/opt/mc-legends/data` bind mount stays, because that is
 where the rollback artefact lives.
 
-> **TODO — check before running.** The socket bind-mount only works if the container's
-> runtime user can read `/var/run/postgresql` and connect to
-> `/var/run/postgresql/.s.PGSQL.5432`. The directory's owner, mode and the container's
-> `USER` were not observed during the preflight. If the connection is refused with
-> `EACCES` (rather than timing out), that is what to look at first.
+**Run this before §6.2 and §7.** The migrations and the JSONL import both go through
+`docker exec` into this container, so this section comes first and the app serves for a
+short window against a database with no `submission_inbox` table — see §6.2 for why that
+is safe.
+
+### Socket permissions — checked, nothing to change
+
+Observed on the VPS on 2026-08-13:
+
+```
+drwxrwsr-x  2 postgres postgres  /var/run/postgresql
+srwxrwxrwx  1 postgres postgres  /var/run/postgresql/.s.PGSQL.5432
+container:  uid=0(root) gid=0(root),  image Config.User is empty
+```
+
+The directory is `r-x` for others, so anything can traverse into it; the socket itself is
+`srwxrwxrwx`, so anything can connect; and the container runs as **root** because the
+image sets no `USER`. The bind mount works as written — no `chmod`, no `usermod`, no
+supplementary group.
+
+Worth noting for later, because it is the part that could change without anyone thinking
+about this file: even a **non-root** container user would still connect, given those two
+modes. Re-check only if `/var/run/postgresql` ever loses its world-execute bit, or if the
+socket mode is tightened — an `EACCES` (as opposed to a timeout) is the signature.
 
 ---
 
@@ -561,18 +626,25 @@ df -h /
 
 ---
 
-## 13. Open TODOs carried by this runbook
+## 13. Open items carried by this runbook
 
-1. **Node version on the VPS** (§6.2) — the repo pins `>=24.18.1 <25`; confirm what is on
-   the host PATH and either install a matching Node or verify the image-based fallback.
-2. **Image contents** (§6.2) — confirm whether `scripts/` and `node_modules/pg` exist in
-   the built image before relying on `docker run … node scripts/migrate.mjs`.
-3. **Socket permissions** (§8) — the owner and mode of `/var/run/postgresql` and the
-   container's runtime user were not observed; verify on the first run.
-4. **No reproducible deploy** — there is still no systemd unit, compose file or deploy
+Three TODOs that this document used to carry are **closed**, resolved read-only on the VPS
+on 2026-08-13 and folded into the sections themselves:
+
+- Node version on the VPS → §6.2 (host v22.22.2 fails the `engines` pin, container
+  v24.19.0 satisfies it; everything runs via `docker exec`).
+- Image contents → §6.2 (no `.dockerignore` in the build context, so `db/migrations/` and
+  `scripts/` are copied in; `pg` is installed by the Dockerfile's `npm ci` once
+  `package.json` carries it — but only in the **rebuilt** image, hence the check there).
+- Socket permissions → §8 (`drwxrwsr-x` directory, `srwxrwxrwx` socket, container runs as
+  root; nothing to change).
+
+What is still open:
+
+1. **No reproducible deploy** — there is still no systemd unit, compose file or deploy
    script. This document is currently the only record of how the container is started.
    Converting it to a checked-in unit is out of MCL-48's scope and should be its own
    ticket.
-5. **Backups** — there is **no working backup of anything on this host**. See
+2. **Backups** — there is **no working backup of anything on this host**. See
    `docs/ops/MCL-48-backup-restore.md`. MCL-48's backup criterion is not met until a real
    restore drill has been run.

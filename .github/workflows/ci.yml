@@ -13,6 +13,21 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    # Production runs PostgreSQL 17.10 (srv1308064.hstgr.cloud, observed 2026-08-13).
+    # Local development runs 15.18, so CI is the only place the production major is
+    # exercised at all.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mcl_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -47,8 +62,27 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit and architecture tests
+      # DATABASE_URL is scoped to THIS step and nowhere else. The composition root selects
+      # the PostgreSQL store whenever it is set and non-blank, so a job-level DATABASE_URL
+      # would silently change what the unit suite is testing.
+      - name: Migrate test database
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mcl_test
+
+      # MCL_TEST_DATABASE_URL (not DATABASE_URL) un-skips the three suites under
+      # tests/integration/; the unit suite keeps running against the file store.
+      - name: Unit, architecture and integration tests
         run: npm run test
+        env:
+          MCL_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mcl_test
+
+      # The step above exits 0 whether the integration suites ran or skipped themselves.
+      # This one fails unless every integration test actually executed and passed.
+      - name: Prove the integration suites ran
+        run: npm run check:integration-ran
+        env:
+          MCL_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mcl_test
 
       # Distinctive canary values, so the scan below is looking for something that was
       # actually present while the client bundle was produced.

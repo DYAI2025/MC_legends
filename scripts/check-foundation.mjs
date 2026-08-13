@@ -43,6 +43,7 @@ const required = [
   "scripts/import-inbox-jsonl.mjs",
   "scripts/check-secrets.mjs",
   "scripts/check-client-secrets.mjs",
+  "scripts/check-integration-tests-ran.mjs",
   "docs/deploy/vps-mc-legends.md",
   "docs/ops/MCL-48-backup-restore.md",
   "docs/security/MCL-34-family-access.md",

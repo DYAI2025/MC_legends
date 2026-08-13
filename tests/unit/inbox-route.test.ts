@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as inboxRoute from "@/app/api/inbox/submissions/route";
 import { POST } from "@/app/api/inbox/submissions/route";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
@@ -97,6 +97,15 @@ async function expectNothingStored(): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Every case below asserts against the JSONL file store, so the store choice must not
+  // depend on the shell that started the run. `createSubmissionInboxStore()` selects
+  // PostgreSQL whenever DATABASE_URL is set and non-blank - and a developer working on
+  // MCL-48 has it exported. Blank, not deleted, on purpose: the composition root uses
+  // `||` rather than `??` precisely so that a defined-but-empty value means "no database
+  // configured", and stubbing the blank exercises that documented fallback rather than
+  // routing around it.
+  vi.stubEnv("DATABASE_URL", "");
+
   directory = await mkdtemp(join(tmpdir(), "avaloria-inbox-route-"));
   process.env.AVALORIA_INBOX_DIR = directory;
   process.env.AVALORIA_FAMILY_ACCESS_CODE = TEST_FAMILY_ACCESS_CODE;
@@ -109,6 +118,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.chdir(originalWorkingDirectory);
+  vi.unstubAllEnvs();
   process.env = { ...environment };
   resetRateLimitersForTest();
   await rm(directory, { recursive: true, force: true });

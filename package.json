@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:architecture": "vitest run tests/architecture",
     "check:foundation": "node scripts/check-foundation.mjs",
+    "check:integration-ran": "node scripts/check-integration-tests-ran.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "verify": "npm run check:foundation && npm run check:secrets && npm run lint && npm run typecheck && npm run test && npm run build",
     "check:secrets": "node scripts/check-secrets.mjs",
