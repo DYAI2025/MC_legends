@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import { describeSubmissionInboxStoreContract } from "./submission-inbox-store-contract";
 
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 
@@ -146,3 +147,12 @@ describe("FileSubmissionInboxStore", () => {
     await expect(new FileSubmissionInboxStore(directory).appendIfAbsent(record())).rejects.toThrow();
   });
 });
+
+// The contract's "empty store per call" requirement is met by the file-level beforeEach:
+// it mkdtemp's a fresh `directory` before every test in this file, including these, and
+// the afterEach removes it. Reusing that hook rather than making a second temp directory
+// keeps one way of getting a scratch inbox in this file - and one way of cleaning it up.
+describeSubmissionInboxStoreContract(
+  "FileSubmissionInboxStore",
+  async () => new FileSubmissionInboxStore(directory),
+);
