@@ -117,4 +117,26 @@ describe("architecture boundaries", () => {
       /from ["']@\/app\//,
     ]);
   });
+
+  it("never lets a test replace the process environment object", async () => {
+    // Measured, not theoretical: `vi.stubEnv` and `vi.unstubAllEnvs` write through a
+    // Proxy whose target is the `process.env` captured when vitest loaded, and that
+    // proxy has no deleteProperty trap. Its get/set traps forward to the *current*
+    // process.env, but an unset - `stubEnv(name, undefined)`, and the delete branch of
+    // `unstubAllEnvs` - deletes from the target. Once a test assigns to `process.env`,
+    // target and current object are two different objects, so every later unset
+    // silently stops unsetting while reads and writes keep working. A fail-closed case
+    // then passes alone and grants in a shared-process run.
+    //
+    // Today only vitest's fork-per-file isolation hides that - a runner setting, not
+    // test hygiene. Measured on this repo with `isolate: false` and a single fork: 7
+    // failures across 2 files, of which 6 were MCL-50's own admin-inbox cases. Once
+    // inbox-route's afterEach had replaced process.env, health-ready-route's unreachable
+    // DATABASE_URL could no longer be unstubbed, so the admin read reached for
+    // PostgreSQL at 127.0.0.1:1 instead of the file store and answered 503.
+    //
+    // A source rule rather than a runtime assertion, because the damage is done in an
+    // afterEach whose own file has already finished asserting.
+    await expectNoForbiddenSource("tests", [/^\s*process\.env\s*=[^=]/mu]);
+  });
 });

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as sessionRoute from "@/app/api/family/session/route";
 import { POST } from "@/app/api/family/session/route";
 import { HmacFamilyAccessGate } from "@/adapters/access/hmac-family-access-gate";
@@ -10,8 +10,6 @@ const ENDPOINT = "http://localhost/api/family/session";
 
 /** Everything a refusal could carry out of the server and into a browser. */
 const INTERNAL_DETAIL = /ENOTDIR|ENOENT|EACCES|node:|\/private\/|\/var\/folders\/|at Object|at async|Error:|stack/iu;
-
-const environment = { ...process.env };
 
 function postRequest(body: string, headers: Record<string, string> = {}): Request {
   return new Request(ENDPOINT, {
@@ -42,17 +40,19 @@ async function expectRefusal(response: Response, status: number, error: string):
 }
 
 beforeEach(() => {
-  process.env.AVALORIA_FAMILY_ACCESS_CODE = TEST_FAMILY_ACCESS_CODE;
-  delete process.env.AVALORIA_SESSION_SECRET;
-  delete process.env.AVALORIA_SESSION_RATE_LIMIT;
-  delete process.env.AVALORIA_SESSION_RATE_WINDOW_MS;
-  delete process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT;
-  delete process.env.AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS;
+  vi.stubEnv("AVALORIA_FAMILY_ACCESS_CODE", TEST_FAMILY_ACCESS_CODE);
+  // stubEnv(undefined) removes the key. Previously `delete process.env.X`, which the
+  // afterEach then undid by replacing the whole env object - see the architecture rule.
+  vi.stubEnv("AVALORIA_SESSION_SECRET", undefined);
+  vi.stubEnv("AVALORIA_SESSION_RATE_LIMIT", undefined);
+  vi.stubEnv("AVALORIA_SESSION_RATE_WINDOW_MS", undefined);
+  vi.stubEnv("AVALORIA_SESSION_GLOBAL_RATE_LIMIT", undefined);
+  vi.stubEnv("AVALORIA_SESSION_GLOBAL_RATE_WINDOW_MS", undefined);
   resetRateLimitersForTest();
 });
 
 afterEach(() => {
-  process.env = { ...environment };
+  vi.unstubAllEnvs();
   resetRateLimitersForTest();
 });
 
@@ -146,7 +146,7 @@ describe("POST /api/family/session", () => {
   });
 
   it("fails closed with a fault when no access code is configured", async () => {
-    delete process.env.AVALORIA_FAMILY_ACCESS_CODE;
+    vi.stubEnv("AVALORIA_FAMILY_ACCESS_CODE", undefined);
 
     const response = await POST(postRequest(JSON.stringify({ accessCode: "irgendwas" })));
 
@@ -155,7 +155,7 @@ describe("POST /api/family/session", () => {
   });
 
   it("refuses further attempts from one caller once the limit is reached", async () => {
-    process.env.AVALORIA_SESSION_RATE_LIMIT = "3";
+    vi.stubEnv("AVALORIA_SESSION_RATE_LIMIT", "3");
     resetRateLimitersForTest();
 
     const attempt = () =>
@@ -181,7 +181,7 @@ describe("POST /api/family/session", () => {
   });
 
   it("counts brute-force attempts per caller", async () => {
-    process.env.AVALORIA_SESSION_RATE_LIMIT = "1";
+    vi.stubEnv("AVALORIA_SESSION_RATE_LIMIT", "1");
     resetRateLimitersForTest();
 
     const guessFrom = (address: string) =>
@@ -199,8 +199,8 @@ describe("POST /api/family/session", () => {
     // the bucket that a rotated x-forwarded-for cannot reset. `x-forwarded-for` is
     // written by the caller, so a per-address counter alone is a counter the attacker
     // owns - N addresses buy N times the allowance, which is no allowance at all.
-    process.env.AVALORIA_SESSION_RATE_LIMIT = "1000";
-    process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT = "4";
+    vi.stubEnv("AVALORIA_SESSION_RATE_LIMIT", "1000");
+    vi.stubEnv("AVALORIA_SESSION_GLOBAL_RATE_LIMIT", "4");
     resetRateLimitersForTest();
 
     const guessFrom = (address: string) =>
@@ -223,8 +223,8 @@ describe("POST /api/family/session", () => {
   });
 
   it("counts a sign-in with no caller address header against the same global bucket", async () => {
-    process.env.AVALORIA_SESSION_RATE_LIMIT = "1000";
-    process.env.AVALORIA_SESSION_GLOBAL_RATE_LIMIT = "2";
+    vi.stubEnv("AVALORIA_SESSION_RATE_LIMIT", "1000");
+    vi.stubEnv("AVALORIA_SESSION_GLOBAL_RATE_LIMIT", "2");
     resetRateLimitersForTest();
 
     // Dropping the header entirely must not be a way out either.

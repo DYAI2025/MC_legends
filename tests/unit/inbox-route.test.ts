@@ -13,7 +13,6 @@ const ENDPOINT = "http://localhost/api/inbox/submissions";
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 const INBOX_FILE = "submissions.jsonl";
 
-const environment = { ...process.env };
 const originalWorkingDirectory = process.cwd();
 
 let directory = "";
@@ -107,19 +106,20 @@ beforeEach(async () => {
   vi.stubEnv("DATABASE_URL", "");
 
   directory = await mkdtemp(join(tmpdir(), "avaloria-inbox-route-"));
-  process.env.AVALORIA_INBOX_DIR = directory;
-  process.env.AVALORIA_FAMILY_ACCESS_CODE = TEST_FAMILY_ACCESS_CODE;
-  delete process.env.AVALORIA_SESSION_SECRET;
-  delete process.env.AVALORIA_INBOX_RATE_LIMIT;
-  delete process.env.AVALORIA_INBOX_RATE_WINDOW_MS;
+  vi.stubEnv("AVALORIA_INBOX_DIR", directory);
+  vi.stubEnv("AVALORIA_FAMILY_ACCESS_CODE", TEST_FAMILY_ACCESS_CODE);
+  vi.stubEnv("AVALORIA_SESSION_SECRET", undefined);
+  vi.stubEnv("AVALORIA_INBOX_RATE_LIMIT", undefined);
+  vi.stubEnv("AVALORIA_INBOX_RATE_WINDOW_MS", undefined);
   resetRateLimitersForTest();
   sessionCookie = familySessionCookieHeader(TEST_FAMILY_ACCESS_CODE);
 });
 
 afterEach(async () => {
+  // chdir first: one case moves the working directory, and the temp dir below is the
+  // one it moved into.
   process.chdir(originalWorkingDirectory);
   vi.unstubAllEnvs();
-  process.env = { ...environment };
   resetRateLimitersForTest();
   await rm(directory, { recursive: true, force: true });
 });
@@ -160,7 +160,7 @@ describe("POST /api/inbox/submissions access", () => {
   });
 
   it("fails closed and stores nothing when no access code is configured", async () => {
-    delete process.env.AVALORIA_FAMILY_ACCESS_CODE;
+    vi.stubEnv("AVALORIA_FAMILY_ACCESS_CODE", undefined);
 
     // Even the session that was valid a moment ago must not get in: a gate that cannot
     // decide has to refuse everyone, not wave through whoever already holds a cookie.
@@ -171,7 +171,7 @@ describe("POST /api/inbox/submissions access", () => {
   });
 
   it("refuses a signed-in caller that submits too often, without acknowledging", async () => {
-    process.env.AVALORIA_INBOX_RATE_LIMIT = "2";
+    vi.stubEnv("AVALORIA_INBOX_RATE_LIMIT", "2");
     resetRateLimitersForTest();
 
     expect((await POST(postRequest(validPayload({ submissionId: "sub-a" })))).status).toBe(201);
@@ -455,7 +455,7 @@ describe("POST /api/inbox/submissions", () => {
     // A host UI that defines the variable and leaves it blank must fall back to the
     // default, not hand mkdir an empty path and 503 on every single submission.
     process.chdir(directory);
-    process.env.AVALORIA_INBOX_DIR = "   ";
+    vi.stubEnv("AVALORIA_INBOX_DIR", "   ");
 
     const response = await POST(postRequest(validPayload()));
 
@@ -468,7 +468,7 @@ describe("POST /api/inbox/submissions", () => {
   it("reports an unavailable inbox with a stable code and no internal detail", async () => {
     const blocker = join(directory, "blocker");
     await writeFile(blocker, "not a directory", "utf8");
-    process.env.AVALORIA_INBOX_DIR = join(blocker, "inbox");
+    vi.stubEnv("AVALORIA_INBOX_DIR", join(blocker, "inbox"));
 
     const response = await POST(postRequest(validPayload()));
 
