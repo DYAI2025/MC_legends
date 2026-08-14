@@ -39,13 +39,16 @@ holds unaltered. Only the machine changed.
 One property the Berlin box had and this one does not: it was always on. A laptop is not.
 That is handled in §2, honestly and with its cost stated, rather than assumed away.
 
-**3. Jira MCL-48's backup criterion is NOT met by this document.**
+**3. Jira MCL-48's backup criterion is MET as of 2026-08-14.**
 
 The criterion is "backup/restore documented **and validated at least once**, restorable
-off this VPS". Documented is half. It is met when the drill in §3 has actually been run
-and its row is filled in in §4 — not before. Deciding the target does not move this, and
-neither does merging this file. The table below deliberately ships with a
-single `pending first drill` row so that the gap is visible rather than implied.
+off this VPS". Documented was only half of it, and for a day this section said so. The
+other half is now done: the drill in §3 was run for real against the production `mcl`
+database on 2026-08-14 and its row is filled in in §4.
+
+What made it met was running the drill — not deciding the target and not merging this
+file. That distinction is left standing here on purpose: the next criterion this document
+grows should have to earn its row the same way.
 
 ---
 
@@ -117,7 +120,15 @@ kilobytes of text, that is still the right trade.
 
 ## 1. The pull script (runs on this MacBook)
 
-Not yet installed — this is the artefact to create.
+**Installed 2026-08-14** at `~/bin/mcl-backup.sh`, mode `0700`, and it has produced a
+verified dump — see the drill record in §4. Until that date this section described an
+artefact that did not exist, which is worth remembering when reading any other runbook:
+a complete script in a document is not a script on a disk.
+
+**It is not scheduled.** The LaunchAgent in §2 has **not** been installed, so nothing
+runs this script but a human typing its name. Today it is a manual backup, and the
+dump-age check in §2 is the only thing that will ever tell you so. Installing the agent
+is the next step and is not part of MCL-48's criterion.
 
 Place at `~/bin/mcl-backup.sh` on this machine (user `benjaminpoersch`), mode `0700`.
 Dumps go to `~/Backups/mc-legends` — outside the repository and outside `Downloads`, both
@@ -249,10 +260,10 @@ P17=/opt/homebrew/opt/postgresql@17/bin
 
 The whole mechanic — pull a custom-format dump from the VPS, `createdb` a scratch database
 on the 17 cluster, `pg_restore --exit-on-error` into it, query it, `dropdb`, stop the
-server — was exercised end to end on 2026-08-14 and works. What has **not** been done is
-the drill against the real `mcl` database, because `mcl` does not exist on the VPS yet:
-provisioning is a separate human-triggered step in
-`docs/deploy/vps-mc-legends.md`. The Jira criterion stays open until that runs. See §4.
+server — was exercised end to end on 2026-08-14 and works, **and on the same day it was
+run against the real `mcl` database**. `mcl` exists on the VPS (owner `mcl_app`, server
+17.10); provisioning happened via `docs/deploy/vps-mc-legends.md`. The Jira criterion is
+met. See §4.
 
 ---
 
@@ -320,6 +331,16 @@ tail -20 ~/Backups/mc-legends/backup.log
 The cost of `RunAtLoad` is a handful of extra dumps on days with several logins. They are
 timestamped, a few kilobytes each, and pruned after `KEEP_DAYS`. Trading a little disk for
 "the machine backs up soon after it is awake" is the right way round.
+
+### Status 2026-08-14: this agent is NOT installed
+
+The plist above is a specification, not a running job. `~/Library/LaunchAgents/com.dyai.mcl-backup.plist`
+does not exist, so nothing schedules the pull and the section below describes a cadence
+that is not currently happening at all. The script in §1 works and has produced a verified
+dump, but only when a human runs it.
+
+Read the rest of this section as what installing the agent would buy, and read the
+dump-age check below as the thing that would have caught this state on its own.
 
 ### A missed window is normal on a laptop, not a fault
 
@@ -430,17 +451,65 @@ Every drill gets a row. A drill that is not written down did not happen.
 
 | Date (UTC) | Dump file | Dump size | Rows restored | Rows at source | `schema_migrations` restored | Match | Run by |
 |---|---|---|---|---|---|---|---|
-| — | — | — | — | — | — | **pending first drill** | — |
+| 2026-08-14T19:53:39Z | `mcl-20260814T195339Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | **PASS** | Claude Code / benjaminpoersch |
 
-The criterion in Jira MCL-48 is "validated at least once". This table has **no completed
-row**, so the criterion is **not met**. It becomes met when a real drill fills in the first
-row — not when this document is merged.
+The criterion in Jira MCL-48 is "validated at least once". The row above is that once.
+
+### First real drill — 2026-08-14
+
+- **Source:** `srv1308064.hstgr.cloud`, PostgreSQL server **17.10**, database `mcl`,
+  owner `mcl_app`. Pre-flight: `/api/health` → `{"status":"ok"}`,
+  `/api/health/ready` → `{"app":"ok","database":"ok"}`; port 5432 listening on
+  `127.0.0.1` and `[::1]` only.
+- **Restore host:** this MacBook, PostgreSQL **17.11** (Homebrew) cluster at
+  `/opt/homebrew/var/postgresql@17`, started on port **5433** for the drill only. The 15
+  cluster on 5432 (holding `mcl_test`) was verified still up and untouched before and
+  after.
+- **Dump:** produced by `~/bin/mcl-backup.sh` — `pg_dump --format=custom --no-owner`
+  run on the VPS over ssh, output written to `~/Backups/mc-legends/` on this Mac. The
+  backup therefore exists on a machine that is not the VPS, which is the half of the
+  criterion the VPS cannot satisfy for itself. **PASS**
+- **`pg_restore --list`:** **PASS** — `Format: CUSTOM`, `Dump Version: 1.16-0`, dumped
+  from 17.10, 13 TOC entries, both tables plus every constraint and index present. The
+  script also runs this check itself on every pull and quarantines a dump that fails it.
+- **Restore:** `pg_restore --dbname=mcl_drill_20260814 --no-owner --exit-on-error`,
+  **exit 0, no output**. **PASS**
+- **Schema after restore:** `schema_migrations` and `submission_inbox` present; all nine
+  `submission_inbox` columns in declaration order; all eight constraints
+  (`_pkey`, `_receipt_id_unique`, `_kind_known`, `_status_known`, and the four length
+  checks); both MCL-50 indexes (`_received_at_idx`, `_question_recent_idx`). **PASS**
+- **Row counts:** restored **1**, source **1**, difference **0**. No submissions arrived
+  between dump and comparison.
+- **`schema_migrations`:** `0001_submission_inbox` on both sides — **exact match**.
+- **Content identity without reading content:** rather than compare text, both sides were
+  fingerprinted with `char_length(original_text)` and `md5(original_text)` alongside the
+  ids, status and instants. Every field matched, `md5` included. That is a stronger check
+  than eyeballing a row *and* it never puts a submission body on a terminal, in a log or
+  in this file — the two goals are not in tension, so neither was traded away.
+- **Cleanup:** scratch database dropped (`select ... where datname like 'mcl_drill_%'`
+  returns nothing); PG17 cluster stopped; 5433 down, 5432 still up. **PASS**
+
+**What the drill did and did not prove.** The single row in `mcl` today is
+`mcl34-vps-smoke-…` against `q-synthetic-1` — a synthetic smoke record from the MCL-34
+deployment check, not a child's answer. So this drill proves the **pipeline** end to end
+on real production infrastructure with the real schema; it has not yet been exercised
+against a database holding real family text. That is a difference in the data, not in the
+mechanism, and the mechanism is what the criterion asks for. It is recorded here rather
+than glossed, because "restored 1 row" reads like more than it is.
 
 ---
 
 ## 5. What this explicitly does not cover
 
 Stated so nobody assumes coverage that does not exist.
+
+> **ASSUMPTION / POLICY_NEEDED — long-term backup retention is undecided.**
+> The script prunes at `KEEP_DAYS=90`. That number is in the script because somebody had
+> to write a number, not because anyone chose 90 days for family data. Nothing records
+> how long submissions may be retained in backup form, who decides, or what a deletion
+> request would have to reach — and the dumps are the one place where deleted rows
+> outlive their deletion. Needs its own decision and its own ticket; do not treat the
+> current value as a policy just because it is running.
 
 - **Point-in-time recovery.** There is **no WAL archiving** and none is configured here.
   The recovery granularity is one dump per successful run, so the worst-case data loss is
