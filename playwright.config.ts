@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { TEST_ADMIN_ACCESS_CODE } from "./tests/support/admin-access-code";
 import { TEST_FAMILY_ACCESS_CODE } from "./tests/support/family-access-code";
 
 const port = Number(process.env.E2E_PORT ?? 3000);
@@ -13,9 +14,15 @@ const host = "127.0.0.1";
  */
 const familyServerEnvironment = {
   AVALORIA_FAMILY_ACCESS_CODE: TEST_FAMILY_ACCESS_CODE,
+  // MCL-50. A different value from the family code above, so the browser tests can
+  // prove the two identities are actually separate rather than merely differently named.
+  AVALORIA_ADMIN_ACCESS_CODE: TEST_ADMIN_ACCESS_CODE,
   AVALORIA_SESSION_RATE_LIMIT: "500",
   AVALORIA_SESSION_GLOBAL_RATE_LIMIT: "500",
   AVALORIA_INBOX_RATE_LIMIT: "500",
+  AVALORIA_ADMIN_RATE_LIMIT: "500",
+  AVALORIA_ADMIN_SESSION_RATE_LIMIT: "500",
+  AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT: "500",
 };
 
 export default defineConfig({
