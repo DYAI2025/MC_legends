@@ -109,6 +109,47 @@ export function createFamilyAccessGate(): FamilyAccessGate {
  * thing that does not treat a child's write session as an adult's read authority.
  */
 export function createAdminAccessGate(): FamilyAccessGate {
+  const adminCode = process.env.AVALORIA_ADMIN_ACCESS_CODE?.trim() ?? "";
+  const familyCode = process.env.AVALORIA_FAMILY_ACCESS_CODE?.trim() ?? "";
+
+  // Setting both variables to the same value silently undoes the whole separation, so
+  // that configuration is refused rather than served.
+  //
+  // WHY it undoes it: the two gates are the same HMAC construction over the same
+  // SESSION_KEY_LABEL, and they share AVALORIA_SESSION_SECRET on purpose. The signing key
+  // is therefore derived from (access code, session secret) - and if the access codes are
+  // equal, the two keys are equal, which makes the two token families interchangeable. A
+  // session minted by the family gate then verifies against the admin gate, and any child
+  // holding the family code could read every sibling's answers. Measured: with identical
+  // codes the admin gate answers `granted` to a family-minted token; with distinct codes
+  // it answers `denied`.
+  //
+  // The structurally stronger fix is a per-audience domain label mixed into the
+  // derivation, which would make the collision impossible instead of merely detected.
+  // That changes MCL-34's token derivation and would invalidate every live family
+  // session, so it is deliberately not done in this slice.
+  //
+  // Compared as trimmed plain strings, not as HMACs. The HMAC comparison in the gate
+  // exists because the value on one side is caller-supplied; both values here are
+  // server-side configuration that no request can influence, so there is no oracle to
+  // protect against. Trimmed because HmacFamilyAccessGate trims what it is handed, which
+  // makes two values differing only in surrounding whitespace the same secret.
+  if (adminCode.length > 0 && adminCode === familyCode) {
+    // A fixed string with no interpolation: neither code may reach a log.
+    console.error(
+      "admin access gate unavailable: the admin access code must differ from the family access code",
+    );
+
+    // Fails closed through the gate's own existing unavailable path rather than a new
+    // sentinel, so this misconfiguration answers exactly as a missing admin code does:
+    // 503 from /api/admin/session and from the protected inbox read. The FAMILY gate is
+    // untouched - the children keep submitting.
+    return new HmacFamilyAccessGate({
+      accessCode: undefined,
+      sessionSecret: process.env.AVALORIA_SESSION_SECRET,
+    });
+  }
+
   return new HmacFamilyAccessGate({
     accessCode: process.env.AVALORIA_ADMIN_ACCESS_CODE,
     sessionSecret: process.env.AVALORIA_SESSION_SECRET,

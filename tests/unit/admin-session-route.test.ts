@@ -169,9 +169,91 @@ describe("POST /api/admin/session", () => {
     expect((await guess("10.0.0.1")).status).toBe(401);
     expect((await guess("10.0.0.2")).status).toBe(401);
 
-    // A fresh address bought a fresh per-caller allowance, and the global bucket still
-    // stopped it. That is the whole point of the second limiter.
+    // Three different claimed addresses, and the third is still refused: rotating the
+    // header bought nothing, because the global bucket has one constant key.
+    //
+    // Note what this case does NOT show. With the per-caller limit at 1000 no attempt
+    // ever needed a fresh per-caller allowance, so nothing here proves the per-caller
+    // bucket is keyed by address at all - a limiter keyed by a constant would pass this
+    // test unchanged. That property is pinned separately below.
     await expectRefusal(await guess("10.0.0.3"), 429, "too-many-requests");
+  });
+
+  it("consumes the global bucket before the per-caller one", async () => {
+    // Ordering is a real property, not an implementation detail, and swapping the two
+    // tryConsume calls changed no test until this one. The distinguishing configuration
+    // is a global ceiling ABOVE the per-caller limit: then the order decides whether a
+    // caller who has already exhausted its own allowance still spends from the global
+    // one. Global-first (correct) -> 401, 429, 429. Per-caller-first -> 401, 429, 401,
+    // because the second attempt would short-circuit without touching the global bucket
+    // and a fresh address would still find room in it.
+    vi.stubEnv("AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT", "2");
+    vi.stubEnv("AVALORIA_ADMIN_SESSION_RATE_LIMIT", "1");
+    resetRateLimitersForTest();
+
+    const guess = (address: string) =>
+      POST(postRequest(JSON.stringify({ accessCode: "nein" }), { "x-forwarded-for": address }));
+
+    expect((await guess("10.0.0.1")).status).toBe(401);
+    expect((await guess("10.0.0.1")).status).toBe(429);
+    expect(
+      (await guess("10.0.0.2")).status,
+      "the exhausted caller must still have spent from the global bucket",
+    ).toBe(429);
+  });
+
+  it("gives each caller address its own allowance", async () => {
+    // Pins that the per-caller bucket is keyed by the caller at all. Replacing
+    // clientAddress(request) with a constant survived the whole suite before this case:
+    // with a fresh address the third attempt must be admitted to the credential check
+    // (401), where a constant key would have refused it (429).
+    vi.stubEnv("AVALORIA_ADMIN_SESSION_RATE_LIMIT", "1");
+    vi.stubEnv("AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT", "1000");
+    resetRateLimitersForTest();
+
+    const guess = (address: string) =>
+      POST(postRequest(JSON.stringify({ accessCode: "nein" }), { "x-forwarded-for": address }));
+
+    expect((await guess("10.0.0.1")).status).toBe(401);
+    expect((await guess("10.0.0.1")).status).toBe(429);
+    expect(
+      (await guess("10.0.0.2")).status,
+      "a different caller must not inherit another caller's exhausted allowance",
+    ).toBe(401);
+  });
+
+  it("refuses without reading the request body at all", async () => {
+    // Rate limiting has to happen before the body is touched, or a flood costs this
+    // server a full body read per refusal. Moving both tryConsume calls after
+    // readBoundedJson broke nothing until this case.
+    vi.stubEnv("AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT", "1");
+    resetRateLimitersForTest();
+
+    const admitted = postRequest(JSON.stringify({ accessCode: "nein" }));
+    expect((await POST(admitted)).status).toBe(401);
+    // Proves the assertion below can actually distinguish anything: a request that got
+    // as far as the credential check HAS had its body consumed.
+    expect(admitted.bodyUsed, "an admitted request must have been read").toBe(true);
+
+    const refused = postRequest(JSON.stringify({ accessCode: "nein" }));
+    expect((await POST(refused)).status).toBe(429);
+    expect(refused.bodyUsed, "a rate-limited request must never be read").toBe(false);
+  });
+
+  it("marks the cookie Secure behind an HTTPS proxy and leaves it unmarked on plain http", async () => {
+    // The admin sibling of tests/unit/family-session-route.test.ts's case. Deleting the
+    // `if (secure)` push from adminSessionSetCookie survived the entire suite, on the
+    // cookie of the two that is worth more.
+    const behindProxy = await POST(
+      postRequest(JSON.stringify({ accessCode: ADMIN_CODE }), {
+        "x-forwarded-proto": "https",
+      }),
+    );
+    expect(behindProxy.headers.get("set-cookie")).toContain("Secure");
+
+    resetRateLimitersForTest();
+    const local = await POST(postRequest(JSON.stringify({ accessCode: ADMIN_CODE })));
+    expect(local.headers.get("set-cookie")).not.toContain("Secure");
   });
 
   it("exposes no method beyond POST", () => {
