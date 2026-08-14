@@ -12,6 +12,7 @@ import {
   describeSubmissionInboxStoreContract,
   inboxRecord,
 } from "../unit/submission-inbox-store-contract";
+import { describeSubmissionInboxReaderContract } from "../unit/submission-inbox-reader-contract";
 
 /**
  * A real PostgreSQL is the whole point of this file. `ON CONFLICT` holding under two
@@ -293,4 +294,17 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
 // registers, so the file is never empty of tests.
 if (ENABLED) {
   describeSubmissionInboxStoreContract("PostgresSubmissionInboxStore", createStore);
+
+  // The same read contract the file adapter satisfies, against the real database. The
+  // ordering, the exact-match filtering and the uncapped total are the three things a
+  // SQL implementation can get wrong in ways an in-memory one cannot - a missing
+  // tiebreaker, a LIKE where an `=` belongs, a count that inherits the LIMIT.
+  describeSubmissionInboxReaderContract("PostgresSubmissionInboxStore", async (seed) => {
+    await emptyTable();
+    const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+    for (const entry of seed) {
+      await store.appendIfAbsent(entry);
+    }
+    return store;
+  });
 }
