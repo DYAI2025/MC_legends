@@ -154,6 +154,8 @@ let protectedRouteLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
 let globalFamilySessionLimiter: RateLimiter | null = null;
 let adminRouteLimiter: RateLimiter | null = null;
+let adminSessionLimiter: RateLimiter | null = null;
+let globalAdminSessionLimiter: RateLimiter | null = null;
 
 export function createProtectedRouteRateLimiter(): RateLimiter {
   protectedRouteLimiter ??= new InMemoryRateLimiter({
@@ -214,9 +216,40 @@ export function createAdminRouteRateLimiter(): RateLimiter {
   return adminRouteLimiter;
 }
 
+/**
+ * Sign-in attempts against the admin code, per caller.
+ *
+ * Its own bucket rather than the family route's: an admin sign-in and a child sign-in
+ * are different secrets with different consequences, and a family sitting on their
+ * allowance must not be able to lock an adult out of the inbox - nor the reverse.
+ */
+export function createAdminSessionRateLimiter(): RateLimiter {
+  adminSessionLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_RATE_LIMIT, 20),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_RATE_WINDOW_MS, 60_000),
+  });
+  return adminSessionLimiter;
+}
+
+/**
+ * The ceiling on admin sign-in attempts for the whole process, whatever address each
+ * attempt claims - the one a spoofed x-forwarded-for cannot reset. Set lower than the
+ * family equivalent because far fewer people hold this code and guessing it is worth
+ * more.
+ */
+export function createGlobalAdminSessionRateLimiter(): RateLimiter {
+  globalAdminSessionLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT, 30),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_GLOBAL_RATE_WINDOW_MS, 60_000),
+  });
+  return globalAdminSessionLimiter;
+}
+
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
   familySessionLimiter = null;
   globalFamilySessionLimiter = null;
   adminRouteLimiter = null;
+  adminSessionLimiter = null;
+  globalAdminSessionLimiter = null;
 }
