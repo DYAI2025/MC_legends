@@ -206,3 +206,26 @@ textarea::placeholder { color: #9aa69c; }
   margin: 0;
   word-break: break-all;
 }
+
+/* The admin page's container. Added because `src/app/admin/page.tsx` set
+   className="page" against no rule at all, so the surface had no width bound and no
+   padding - its h1 and cards ran to the viewport edge.
+
+   Deliberately NOT reusing the child-facing `.site-shell` + `.content-width` pair: this
+   surface is not part of that world, and `.site-shell`'s `overflow: hidden` exists for
+   the hero art's rotated shapes, which nothing here has. The width expression is copied
+   from `.content-width` on purpose so the two surfaces line up at the same measure. */
+.page {
+  width: min(1120px, calc(100% - 48px));
+  margin-inline: auto;
+  padding-block: 2rem 4rem;
+}
+
+/* The "N von M Antworten" line. Its own rule because it is the one place the view states
+   how much it is NOT showing, and it must not read as body copy next to the cards. */
+.admin-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 0 0 1rem;
+}
