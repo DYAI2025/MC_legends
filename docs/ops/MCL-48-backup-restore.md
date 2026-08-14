@@ -193,43 +193,66 @@ Notes on the choices:
 - The timestamped filename means every run produces a new file and no run ever overwrites
   a previous good dump.
 
-### Blocker: this Mac's PostgreSQL client tools are too old
+### Toolchain: RESOLVED 2026-08-14 — but read the port note
 
-The VPS runs **PostgreSQL 17.10**. This Mac currently has **PostgreSQL 15.18** via
-Homebrew (`/opt/homebrew/opt/postgresql@15/bin`, `pg_restore (PostgreSQL) 15.18`).
+The version skew that used to block this is gone. `brew install postgresql@17` has been
+run on this Mac, and all four preconditions are now verified rather than assumed.
 
-**`pg_restore` 15 cannot read a custom-format dump written by `pg_dump` 17** — it rejects
-the archive header outright. That breaks two things, not one:
+The skew was real, and worth recording so nobody removes the explicit PATH line thinking
+it is decoration. The VPS runs **PostgreSQL 17.10**; this Mac also has **15.18** installed
+(`/opt/homebrew/opt/postgresql@15/bin`), and `pg_restore` 15 **cannot** read a
+custom-format archive written by `pg_dump` 17. Proven against a real dump pulled from the
+VPS:
 
-- the `pg_restore --list` verification inside the script above, so the pull script would
-  fail on every run and quarantine every dump as `.corrupt`; and
-- the restore drill in §3, which is the thing that actually closes the Jira criterion.
+```
+$ /opt/homebrew/opt/postgresql@15/bin/pg_restore --list mcl-probe.dump
+pg_restore: Fehler: nicht unterstützte Version (1.16) im Dateikopf
 
-Fix before the first real run — either:
+$ /opt/homebrew/opt/postgresql@17/bin/pg_restore --list mcl-probe.dump
+pg_restore (PostgreSQL) 17.11 (Homebrew)
+; Archive created at 2026-08-14 01:08:02 CEST
+;     dbname: postgres
+;     TOC Entries: 5
+```
 
-- `brew install postgresql@17` on this Mac (the formula ships both the client tools and a
-  server, which the drill also needs), then keep the explicit
-  `/opt/homebrew/opt/postgresql@17/bin` PATH line in the script; or
-- run the drill on some other machine that already has PostgreSQL ≥ 17.
+That would have broken the pull script's **own** `pg_restore --list` verification on every
+single run — quarantining every dump as `.corrupt` — not merely the drill. Both formulae
+are keg-only and neither is linked into `PATH`, so whichever `pg_restore` the shell happens
+to find is not something to rely on. **Keep the explicit
+`/opt/homebrew/opt/postgresql@17/bin` PATH line in the script and in the drill.**
 
-Installing `postgresql@17` alongside `postgresql@15` is fine — neither formula is linked
-into the PATH by default, which is exactly why the script names the directory explicitly
-instead of trusting whatever `pg_restore` the shell finds.
+**Preconditions, all verified 2026-08-14:**
 
-> **TODO before first use, in this order:**
->
-> 1. Install PostgreSQL ≥ 17 client tools (above) and confirm
->    `/opt/homebrew/opt/postgresql@17/bin/pg_restore --version` reports 17.x.
-> 2. Confirm the ssh key this Mac uses for `root@srv1308064.hstgr.cloud` has **no
->    passphrase**, i.e. that `ssh -o BatchMode=yes root@srv1308064.hstgr.cloud true`
->    succeeds. A key that only works because an `ssh-agent` is unlocked in an interactive
->    shell will not work from a launchd job, which does not inherit that session reliably.
-> 3. Confirm `pg_dump` **on the VPS** is 17.x (`sudo -u postgres pg_dump --version`). It
->    must be ≥ the server's 17.10. Expected to be, since it comes from the same server
->    package — but not verified, so check rather than assume.
-> 4. Confirm whether a local PostgreSQL **server** is running on this Mac and on which
->    port. Only the 15.x client binaries were observed; whether anything is listening is
->    unknown. §3 needs a server ≥ 17 to `createdb` into.
+1. **Client tools ≥ 17** — `/opt/homebrew/opt/postgresql@17/bin/pg_restore --version` →
+   `pg_restore (PostgreSQL) 17.11 (Homebrew)`. ✅
+2. **Passphrase-free ssh key** — `ssh -o BatchMode=yes root@76.13.130.224` succeeds
+   without a prompt, so a launchd job that inherits no unlocked `ssh-agent` will work. ✅
+3. **`pg_dump` on the VPS** — `pg_dump (PostgreSQL) 17.10`, matching its server. ✅
+4. **A local server ≥ 17 for the drill** — `brew install postgresql@17` created a cluster
+   at `/opt/homebrew/var/postgresql@17`. It is **not** running by default, which is
+   deliberate; see the port note. ✅
+
+#### Port note: 5432 belongs to the 15 cluster
+
+`postgresql@15` is running on the default port **5432** and holds `mcl_test`, the database
+the repository's integration tests use. Do **not** `brew services start postgresql@17` —
+it would take 5432 and the two clusters would fight over it.
+
+Start the 17 cluster on another port only for the duration of a drill, then stop it:
+
+```bash
+P17=/opt/homebrew/opt/postgresql@17/bin
+"$P17"/pg_ctl -D /opt/homebrew/var/postgresql@17 -o "-p 5433" -l /tmp/pg17.log start
+# ... run the drill in §3 against -p 5433 ...
+"$P17"/pg_ctl -D /opt/homebrew/var/postgresql@17 stop
+```
+
+The whole mechanic — pull a custom-format dump from the VPS, `createdb` a scratch database
+on the 17 cluster, `pg_restore --exit-on-error` into it, query it, `dropdb`, stop the
+server — was exercised end to end on 2026-08-14 and works. What has **not** been done is
+the drill against the real `mcl` database, because `mcl` does not exist on the VPS yet:
+provisioning is a separate human-triggered step in
+`docs/deploy/vps-mc-legends.md`. The Jira criterion stays open until that runs. See §4.
 
 ---
 
@@ -345,13 +368,20 @@ anything.
 Run on this MacBook, against its own local PostgreSQL. Only the two source-count queries
 at the end touch the VPS, and they are read-only.
 
-**This drill cannot be run on this machine yet.** It needs `pg_restore` **and** a
-PostgreSQL server of version ≥ 17 locally, because the dump comes from a 17.10 server; the
-Mac has 15.18. See the blocker in §1. Install `postgresql@17` (and start it) or run the
-drill elsewhere — do not work around it by downgrading the dump format.
+The toolchain for this is in place as of 2026-08-14 (§1) and the mechanic has been
+exercised end to end. What is still missing is the **subject**: the `mcl` database does not
+exist on the VPS yet, so there is nothing real to dump. Run this drill immediately after
+provisioning and the first deploy, and record the result in §4.
+
+Every command below runs on the 17 cluster on port **5433**, because the 15 cluster owns
+5432 and holds the repository's `mcl_test` — see the port note in §1. Start the server
+first, and stop it when you are done.
 
 ```bash
 export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"   # >= 17, see §1
+export PGPORT=5433                                        # the 17 cluster; 15 owns 5432
+
+pg_ctl -D /opt/homebrew/var/postgresql@17 -o "-p 5433" -l /tmp/pg17.log start
 
 DUMP=~/Backups/mc-legends/mcl-<stamp>.dump
 SCRATCH=mcl_drill_$(date -u +%Y%m%d)
@@ -373,6 +403,9 @@ ssh root@srv1308064.hstgr.cloud \
 
 # 4. Drop the scratch database. Do not leave a stale copy of family answers lying around.
 dropdb "$SCRATCH"
+
+# 5. Stop the 17 cluster again, so it cannot drift into competing with the 15 one.
+pg_ctl -D /opt/homebrew/var/postgresql@17 stop
 ```
 
 **Pass condition.** The restored `count(*)` equals the source count **as of the moment the
