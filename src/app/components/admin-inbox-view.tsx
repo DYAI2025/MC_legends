@@ -1,7 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { buildInboxQuery, EMPTY_FILTERS, type AdminFilterState } from "@/app/admin-inbox-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  buildInboxQuery,
+  createLatestOnly,
+  EMPTY_FILTERS,
+  QUESTION_FILTER_DEBOUNCE_MS,
+  type AdminFilterState,
+} from "@/app/admin-inbox-query";
 import type { AdminInboxResult } from "@/application/submissions/admin-inbox-client";
 import type { InboxEntry, InboxPage } from "@/application/submissions/submission-inbox-reader";
 import { createBrowserAdminInboxClient } from "@/composition/browser";
@@ -42,6 +48,19 @@ export function AdminInboxView() {
   const [isLoading, setIsLoading] = useState(true);
 
   /**
+   * What the question box currently shows, which runs ahead of the committed filter
+   * while somebody is still typing. `filters` stays the query the list actually answers,
+   * so the two never disagree about what is on screen: the list always shows the results
+   * of the committed filter, and the only window where the box is ahead of the list is
+   * the debounce interval itself.
+   */
+  const [questionDraft, setQuestionDraft] = useState(EMPTY_FILTERS.questionId);
+
+  // One sequence per mounted view, so a read issued here can only be superseded by a
+  // later read from this same view.
+  const sequenceRef = useRef(createLatestOnly());
+
+  /**
    * Moves the controls and marks the list as loading in the same event.
    *
    * The "loading" flag is raised here rather than at the top of `load`, because a
@@ -60,8 +79,16 @@ export function AdminInboxView() {
   );
 
   const load = useCallback(async (active: AdminFilterState) => {
+    const sequence = sequenceRef.current;
+    const ticket = sequence.issue();
+
     try {
       const result = await inboxClient.list(buildInboxQuery(active));
+
+      // A superseded read is discarded in silence - including a superseded failure, so a
+      // stale `transport` error cannot replace the fresh page that overtook it. Reads can
+      // resolve in any order, and the newest filter is the only question being asked.
+      if (!sequence.isLatest(ticket)) return;
 
       if (result.outcome === "granted") {
         setFailure(null);
@@ -75,13 +102,35 @@ export function AdminInboxView() {
       setPage(null);
       setFailure(failureMessages[result.outcome]);
     } finally {
-      setIsLoading(false);
+      // Guarded too. An older read finishing must not lower the flag while the newest is
+      // still running, or the page underneath would be presented as the finished answer.
+      if (sequence.isLatest(ticket)) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load(filters);
   }, [filters, load]);
+
+  /**
+   * Commits the typed question once typing pauses.
+   *
+   * Only this one control is debounced; the selects and the reset button call
+   * `applyFilters` directly and commit at once. Committing produces a fresh filter object,
+   * so the read effect above always re-runs and always clears the loading flag - the
+   * early return here is safe precisely because a keystroke does not raise that flag.
+   */
+  useEffect(() => {
+    if (questionDraft === filters.questionId) return;
+
+    const timer = setTimeout(() => {
+      applyFilters((current) => ({ ...current, questionId: questionDraft }));
+    }, QUESTION_FILTER_DEBOUNCE_MS);
+
+    // Runs on unmount as well as before the next keystroke, so a pending timer can never
+    // set state on a view that is no longer on screen.
+    return () => clearTimeout(timer);
+  }, [questionDraft, filters.questionId, applyFilters]);
 
   return (
     <section className="admin-inbox" aria-label="Eingegangene Antworten">
@@ -130,10 +179,8 @@ export function AdminInboxView() {
             id="filter-question"
             type="text"
             autoComplete="off"
-            value={filters.questionId}
-            onChange={(event) =>
-              applyFilters((current) => ({ ...current, questionId: event.target.value }))
-            }
+            value={questionDraft}
+            onChange={(event) => setQuestionDraft(event.target.value)}
           />
         </div>
 
@@ -146,7 +193,12 @@ export function AdminInboxView() {
           // reference - would never re-run to clear the loading flag this click just
           // raised. The list would sit behind "Wird geladen …" with no request in
           // flight. The other controls cannot hit this: they spread into a new object.
-          onClick={() => applyFilters(() => ({ ...EMPTY_FILTERS }))}
+          // Clears the box as well as the query, so no pending keystroke can commit
+          // itself after the reset and quietly re-filter the list.
+          onClick={() => {
+            setQuestionDraft(EMPTY_FILTERS.questionId);
+            applyFilters(() => ({ ...EMPTY_FILTERS }));
+          }}
         >
           Filter zurücksetzen
         </button>
