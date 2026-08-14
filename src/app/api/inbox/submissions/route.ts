@@ -1,6 +1,9 @@
 import { readBoundedJson } from "@/adapters/http/bounded-json-body";
 import { guardFamilyRequest } from "@/adapters/http/family-request-guard";
-import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import {
+  SubmissionPayloadError,
+  type InboxRecord,
+} from "@/application/submissions/submission-inbox-store";
 import {
   createFamilyAccessGate,
   createProtectedRouteRateLimiter,
@@ -61,7 +64,51 @@ function readField(source: Record<string, unknown>, field: keyof SubmittedFields
     return null;
   }
 
+  // Two shapes that pass every check above and that the store cannot hold.
+  //
+  // A NUL arrives as a JSON escape, so it survives the strict UTF-8 decode in
+  // bounded-json-body; it is not whitespace, so it survives trim(); and it is one
+  // character, so it is under every cap. PostgreSQL then refuses it outright (22021) -
+  // a validation problem reported as an outage, repeating forever because the payload
+  // never changes.
+  //
+  // A lone surrogate is worse: node-postgres encodes parameters with
+  // Buffer.from(str, "utf8"), which silently rewrites it to U+FFFD. The text stored
+  // would not be the text the child sent, which the schema, the body guard and MCL-48
+  // all say it must be.
+  //
+  // Refused, never sanitised. Stripping the NUL or repairing the surrogate would be
+  // this server quietly editing a child's words - exactly what "never trimmed, never
+  // normalised" forbids. isWellFormed() is ES2024 and present on Node 20+.
+  if (value.includes("\u0000") || !value.isWellFormed()) {
+    return null;
+  }
+
   return value;
+}
+
+/**
+ * The years both sides spell the same way.
+ *
+ * PostgreSQL has no year zero, and Date.toISOString() - which the adapter binds -
+ * switches to the expanded ±YYYYYY form outside 1..9999, which timestamptz reads as a
+ * time zone displacement and refuses. So "0000-01-01", "-000001-01-01" and
+ * "+275760-09-13" are all values Date.parse reads happily and the database will not
+ * store, and none of them is exotic: an uninitialised field or a buggy date picker
+ * produces the first.
+ */
+const MIN_YEAR = 1;
+const MAX_YEAR = 9999;
+
+/** True only for an instant the store can hold, not merely one Date.parse understands. */
+function isStorableInstant(value: string): boolean {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+
+  const year = new Date(parsed).getUTCFullYear();
+  return year >= MIN_YEAR && year <= MAX_YEAR;
 }
 
 function readSubmittedFields(body: unknown): SubmittedFields | null {
@@ -85,8 +132,9 @@ function readSubmittedFields(body: unknown): SubmittedFields | null {
   }
 
   // A createdAt that is not a real instant would sort as garbage in the admin view
-  // MCL-50 adds later.
-  if (Number.isNaN(Date.parse(createdAt))) {
+  // MCL-50 adds later - and one outside the storable year range would not reach the
+  // admin view at all, because the store refuses it.
+  if (!isStorableInstant(createdAt)) {
     return null;
   }
 
@@ -146,6 +194,17 @@ export async function POST(request: Request): Promise<Response> {
   try {
     outcome = await createSubmissionInboxStore().appendIfAbsent(record);
   } catch (cause) {
+    if (cause instanceof SubmissionPayloadError) {
+      // The store refused the values, not the request that carried them. 503 here would
+      // report a permanent refusal as an outage, and the child would retry an unchanged
+      // payload against it forever - so it gets the same 400 this route's own guards
+      // answer with. Logged all the same, and as an error: a payload the guards above
+      // let through and the store would not hold is a hole in those guards, and the
+      // only place it can be seen is here.
+      console.error("inbox append refused the payload", cause);
+      return refuse(400, "invalid-payload");
+    }
+
     // Server-side only. The response stays a bare code so nothing internal reaches a
     // child's browser, but an outage has to leave a trace somewhere.
     console.error("inbox append failed", cause);

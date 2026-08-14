@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as inboxRoute from "@/app/api/inbox/submissions/route";
 import { POST } from "@/app/api/inbox/submissions/route";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
@@ -97,6 +97,15 @@ async function expectNothingStored(): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Every case below asserts against the JSONL file store, so the store choice must not
+  // depend on the shell that started the run. `createSubmissionInboxStore()` selects
+  // PostgreSQL whenever DATABASE_URL is set and non-blank - and a developer working on
+  // MCL-48 has it exported. Blank, not deleted, on purpose: the composition root uses
+  // `||` rather than `??` precisely so that a defined-but-empty value means "no database
+  // configured", and stubbing the blank exercises that documented fallback rather than
+  // routing around it.
+  vi.stubEnv("DATABASE_URL", "");
+
   directory = await mkdtemp(join(tmpdir(), "avaloria-inbox-route-"));
   process.env.AVALORIA_INBOX_DIR = directory;
   process.env.AVALORIA_FAMILY_ACCESS_CODE = TEST_FAMILY_ACCESS_CODE;
@@ -109,6 +118,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.chdir(originalWorkingDirectory);
+  vi.unstubAllEnvs();
   process.env = { ...environment };
   resetRateLimitersForTest();
   await rm(directory, { recursive: true, force: true });
@@ -202,6 +212,19 @@ describe("POST /api/inbox/submissions", () => {
       createdAt: "2026-08-11T00:00:00.000Z",
       originalText: ORIGINAL_TEXT,
     });
+  });
+
+  it("mints receivedAt in the one canonical ISO shape", async () => {
+    const response = await POST(postRequest(validPayload()));
+
+    const body = (await response.json()) as { receivedAt: string };
+    // Not decoration: a retry is answered with the receivedAt the store handed back,
+    // and the PostgreSQL store of MCL-48 reads it out of a timestamptz as
+    // Date.toISOString(). The two match only while this route mints exactly that shape,
+    // and that invariant otherwise spans two files with nothing connecting them - so a
+    // change here to, say, a value with an offset would break the ACK a child already
+    // holds, silently and only on the retry path.
+    expect(body.receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
   it("issues its own receipt and ignores one the client tried to dictate", async () => {
@@ -353,6 +376,55 @@ describe("POST /api/inbox/submissions", () => {
 
   it("rejects a createdAt that is not a real instant", async () => {
     const response = await POST(postRequest(validPayload({ createdAt: "hello" })));
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
+  it("rejects a createdAt in a year the store cannot hold", async () => {
+    // Not exotic: an uninitialised field or a buggy date picker produces it. Date.parse
+    // reads it happily, and PostgreSQL refuses it forever because it has no year zero -
+    // so without this guard the child is told the inbox is down, on every retry of a
+    // payload that never changes.
+    const response = await POST(postRequest(validPayload({ createdAt: "0000-01-01" })));
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
+  it("still accepts every createdAt spelling the year range must not swallow", async () => {
+    // The guard above is a range check bolted onto Date.parse, and the cheapest way to
+    // get it wrong is to over-reject. These four are what the store's own cases already
+    // rely on being accepted.
+    for (const createdAt of ["2026", "2026-08", "2026-08-14", "2026-08-14T09:00:00.000Z"]) {
+      const response = await POST(
+        postRequest(validPayload({ createdAt, submissionId: `sub-${createdAt}` })),
+      );
+
+      expect(response.status, `createdAt ${createdAt} must still be accepted`).toBe(201);
+    }
+  });
+
+  it("rejects a NUL in the answer without acknowledging it", async () => {
+    // Legal JSON as an escape, so it survives the strict UTF-8 decode; not whitespace,
+    // so it survives trim(); one character, so it is under every cap. PostgreSQL then
+    // refuses it permanently (22021).
+    const response = await POST(
+      postRequest(validPayload({ originalText: "drache\u0000ende" })),
+    );
+
+    await expectRefusal(response, 400, "invalid-payload");
+    await expectNothingStored();
+  });
+
+  it("rejects a lone surrogate in the answer instead of storing a repaired version", async () => {
+    // node-postgres encodes parameters with Buffer.from(str, "utf8"), which rewrites an
+    // unpaired surrogate to U+FFFD - so accepting this would store text that is not the
+    // text the child sent. Refused, never repaired: the original has to survive byte
+    // for byte or not at all.
+    const response = await POST(
+      postRequest(validPayload({ originalText: "drache\ud83dende" })),
+    );
 
     await expectRefusal(response, 400, "invalid-payload");
     await expectNothingStored();
