@@ -61,6 +61,22 @@ describe("architecture boundaries", () => {
     ]);
   });
 
+  it("points the browser admin sign-in at the admin endpoint, not the family one", async () => {
+    // The endpoint string is the entire difference between the two sign-in factories, and
+    // it is not reachable from a unit test without a live fetch - so nothing else in the
+    // suite notices if it changes. Measured: re-pointing the admin factory at
+    // /api/family/session leaves the whole suite green and tsc silent, while making the
+    // admin panel authenticate against the children's gate. That is the one separation
+    // the fail-closed gate in the previous commit exists to protect, so it is asserted at
+    // the level where the mistake is visible: the source.
+    const source = await readFile("src/composition/browser.ts", "utf8");
+
+    expect(source).toContain("/api/admin/session");
+    // And never names the family endpoint: HttpFamilySessionClient defaults to it, so the
+    // only way that string appears here is a factory pointed at the wrong gate.
+    expect(source).not.toContain("/api/family/session");
+  });
+
   it("lets only the domain module name the server acknowledged status", async () => {
     // The bare literal, not an assignment shape: `{ status: ACK }` via a constant and
     // `{ ["status"]: "SERVER_ACKNOWLEDGED" }` both evade a `status:`-anchored pattern.

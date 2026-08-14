@@ -58,6 +58,35 @@ describe("HttpAdminInboxClient", () => {
     // and the route refuses the second one.
     expect(url.searchParams.has("kind")).toBe(false);
     expect(captured.init?.credentials).toBe("same-origin");
+    // The whole request line, not just its query. This route exports GET and nothing
+    // else on purpose - the mutation verbs do not exist - so a client that sent POST
+    // would collect a 405 and report it as `transport`, hiding a wiring bug behind a
+    // message about the network.
+    expect(captured.init?.method).toBe("GET");
+  });
+
+  it("round-trips the page size", async () => {
+    const captured: { url?: string; init?: RequestInit } = {};
+    const client = new HttpAdminInboxClient({ fetchImplementation: okFetch(captured) });
+
+    await client.list({ limit: 25 });
+
+    const url = new URL(captured.url ?? "", "http://localhost");
+    expect(url.searchParams.get("limit")).toBe("25");
+  });
+
+  it.each(["", "   "])("treats a blank questionId (%j) as no filter at all", async (questionId) => {
+    const captured: { url?: string; init?: RequestInit } = {};
+    const client = new HttpAdminInboxClient({ fetchImplementation: okFetch(captured) });
+
+    await client.list({ questionId });
+
+    const url = new URL(captured.url ?? "", "http://localhost");
+    // questionId is the only free-text filter, so it is the one that arrives as "" from
+    // an empty input element. The route refuses a blank one with 400, and an adult who
+    // cleared the search box has not asked an invalid question - they have asked for no
+    // filter. Handled here rather than trusted to every caller.
+    expect(url.searchParams.has("questionId")).toBe(false);
   });
 
   it.each([
@@ -84,9 +113,41 @@ describe("HttpAdminInboxClient", () => {
     await expect(client.list({})).resolves.toEqual({ outcome: "transport" });
   });
 
+  it("keeps its never-throws promise when a replaced fetch resolves no response", async () => {
+    // The port documents that this method never throws, and the default implementation
+    // resolves the global fetch at call time - so a page or a test that monkey-patches
+    // window.fetch and forgets to return its value decides whether that promise holds.
+    // Pinned here because the invariant is a doc claim, and a doc claim the code does not
+    // keep is worse than no comment: the caller writes no error path for it.
+    const client = new HttpAdminInboxClient({
+      fetchImplementation: async () => undefined as unknown as Response,
+    });
+
+    await expect(client.list({})).resolves.toEqual({ outcome: "transport" });
+  });
+
   it("reports transport rather than throwing when the body is unreadable", async () => {
     const client = new HttpAdminInboxClient({
       fetchImplementation: async () => new Response("not json", { status: 200 }),
+    });
+
+    await expect(client.list({})).resolves.toEqual({ outcome: "transport" });
+  });
+
+  it.each([
+    ["null", "null"],
+    ["an empty object", "{}"],
+    ["a total that is not a number", '{"entries":[],"total":"lots"}'],
+    ["entries that are not a list", '{"entries":{},"total":1}'],
+  ])("refuses a 200 whose body is not an inbox page (%s)", async (_name, body) => {
+    // A 200 is not proof the inbox answered. A captive portal, an SSO consent page or a
+    // proxy can all return valid JSON of the wrong shape, and handing that to the view as
+    // `granted` is how "3 answers" appears when there are 300 - the exact failure the
+    // reader port's own doc calls worse than no number at all. Envelope only: the entries
+    // themselves stay the server's business.
+    const client = new HttpAdminInboxClient({
+      fetchImplementation: async () =>
+        new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
     });
 
     await expect(client.list({})).resolves.toEqual({ outcome: "transport" });
