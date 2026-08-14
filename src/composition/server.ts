@@ -6,6 +6,7 @@ import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-su
 import type { FamilyAccessGate } from "@/application/access/family-access";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
+import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
 
@@ -86,6 +87,58 @@ export function createFamilyAccessGate(): FamilyAccessGate {
   });
 }
 
+/**
+ * The admin access gate (MCL-50).
+ *
+ * A DIFFERENT secret from the family gate, not a different call to the same one. The
+ * family access code is what the children hold in order to submit; if the protected
+ * read verified against it, any child with that code could read every sibling's answers
+ * - and the code would look correct, because it would be the same gate and the same
+ * mechanism. The separation is the secret, and it has to live here, in the one module
+ * allowed to name secrets at all.
+ *
+ * An unset or blank admin code produces a gate that answers `unavailable` to
+ * everything, exactly as the family gate does. A missing secret closes the door.
+ *
+ * The session secret is shared with the family gate deliberately: it is signing
+ * material, not an identity, and the identity is already separated by the access code.
+ * Sharing it means one value to rotate rather than two to forget.
+ *
+ * This is an MVP boundary, not a role model. Jira MCL-50 puts the final production role
+ * and consent policy explicitly out of scope; what is here is the narrowest reversible
+ * thing that does not treat a child's write session as an adult's read authority.
+ */
+export function createAdminAccessGate(): FamilyAccessGate {
+  return new HmacFamilyAccessGate({
+    accessCode: process.env.AVALORIA_ADMIN_ACCESS_CODE,
+    sessionSecret: process.env.AVALORIA_SESSION_SECRET,
+  });
+}
+
+/**
+ * The read side of the inbox (MCL-50), chosen the same way the write side is.
+ *
+ * Same selection rule as createSubmissionInboxStore on purpose: whichever store the
+ * writes are going to is the one the admin view must read from. Two independent rules
+ * would eventually disagree, and the shape of that disagreement is an inbox that looks
+ * empty while submissions are being accepted - the single most alarming and least
+ * informative failure this feature could have.
+ *
+ * The file branch is not dead code for the same reason it is not dead on the write
+ * side: it is MCL-48's rollback path.
+ */
+export function createSubmissionInboxReader(): SubmissionInboxReader {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresSubmissionInboxStore(url);
+  }
+
+  return new FileSubmissionInboxStore(
+    process.env.AVALORIA_INBOX_DIR?.trim() || DEFAULT_INBOX_DIRECTORY,
+  );
+}
+
 function positiveInteger(raw: string | undefined, fallback: number): number {
   const value = Number(raw?.trim());
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -100,6 +153,7 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
 let protectedRouteLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
 let globalFamilySessionLimiter: RateLimiter | null = null;
+let adminRouteLimiter: RateLimiter | null = null;
 
 export function createProtectedRouteRateLimiter(): RateLimiter {
   protectedRouteLimiter ??= new InMemoryRateLimiter({
@@ -145,8 +199,24 @@ export function createGlobalFamilySessionRateLimiter(): RateLimiter {
  * built from the limits the case just configured, and they must not inherit the
  * attempts of the case before them. Nothing in the running app calls this.
  */
+/**
+ * Its own bucket, not the family route's.
+ *
+ * Sharing one counter would let child submissions exhaust the admin view's allowance
+ * and the other way round - and the admin read is the thing somebody reaches for when
+ * they want to know what is going on, which is exactly when the write path is busiest.
+ */
+export function createAdminRouteRateLimiter(): RateLimiter {
+  adminRouteLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_RATE_LIMIT, 60),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_RATE_WINDOW_MS, 60_000),
+  });
+  return adminRouteLimiter;
+}
+
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
   familySessionLimiter = null;
   globalFamilySessionLimiter = null;
+  adminRouteLimiter = null;
 }

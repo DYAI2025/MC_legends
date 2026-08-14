@@ -25,6 +25,10 @@ const MINIMUM_SECRET_LENGTH = 8;
 const secrets = [
   ["AVALORIA_FAMILY_ACCESS_CODE", process.env.AVALORIA_FAMILY_ACCESS_CODE],
   ["AVALORIA_SESSION_SECRET", process.env.AVALORIA_SESSION_SECRET],
+  // MCL-50's admin code. Added the moment the secret existed: a scan that covers only
+  // the secrets somebody remembered to list is a scan that reports "ok" while the
+  // newest one is sitting in a bundle.
+  ["AVALORIA_ADMIN_ACCESS_CODE", process.env.AVALORIA_ADMIN_ACCESS_CODE],
 ].filter(([, value]) => typeof value === "string" && value.trim().length > 0);
 
 if (secrets.length === 0) {

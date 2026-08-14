@@ -78,7 +78,15 @@ describe("architecture boundaries", () => {
     // artifact somebody has to remember to scan.
     await expectNoForbiddenSource(
       "src",
-      [/AVALORIA_FAMILY_ACCESS_CODE/, /AVALORIA_SESSION_SECRET/],
+      [
+        /AVALORIA_FAMILY_ACCESS_CODE/,
+        /AVALORIA_SESSION_SECRET/,
+        // MCL-50's admin code, held to the same rule from the day it exists. A second
+        // secret is a second chance for a component to read one directly and drag it
+        // into the client bundle, and the rule is worth nothing if it only covers the
+        // secrets somebody remembered to add.
+        /AVALORIA_ADMIN_ACCESS_CODE/,
+      ],
       ["src/composition/server.ts"],
     );
   });
