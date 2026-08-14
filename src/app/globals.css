@@ -139,3 +139,70 @@ textarea::placeholder { color: #9aa69c; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; }
 }
+
+/* MCL-50 admin inbox. Deliberately plain: this surface is for the project team, not
+   part of the child-facing world, and it must not compete with it. */
+.admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  margin-bottom: 1.5rem;
+}
+
+.admin-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-entries {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.admin-entry {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+}
+
+/* The visual separation the acceptance criteria ask for: the original artifact and the
+   derived/system information never share a box or a background. */
+.admin-original {
+  padding: 0.75rem;
+  border-left: 4px solid currentColor;
+}
+
+.admin-original-text {
+  /* Keeps the exact whitespace the store preserved. */
+  white-space: pre-wrap;
+  font-size: 1.05rem;
+}
+
+.admin-derived {
+  padding: 0.75rem;
+  opacity: 0.85;
+  font-size: 0.9rem;
+}
+
+.admin-derived dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.admin-derived dt {
+  font-weight: 600;
+}
+
+.admin-derived dd {
+  margin: 0;
+  word-break: break-all;
+}

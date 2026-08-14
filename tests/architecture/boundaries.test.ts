@@ -117,6 +117,10 @@ describe("architecture boundaries", () => {
     for (const clientComponent of [
       "src/app/family-experience.tsx",
       "src/app/components/family-access-gate.tsx",
+      // MCL-50. Added with the components themselves: this list is hardcoded, so a
+      // client component missing from it is one the rule silently does not cover.
+      "src/app/components/admin-access-gate.tsx",
+      "src/app/components/admin-inbox-view.tsx",
     ]) {
       await expectNoForbiddenSource(clientComponent, [
         /from ["']@\/composition\/server["']/,
