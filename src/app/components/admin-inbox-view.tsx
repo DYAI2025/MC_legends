@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildInboxQuery,
@@ -56,9 +57,41 @@ export function AdminInboxView() {
    */
   const [questionDraft, setQuestionDraft] = useState(EMPTY_FILTERS.questionId);
 
-  // One sequence per mounted view, so a read issued here can only be superseded by a
-  // later read from this same view.
-  const sequenceRef = useRef(createLatestOnly());
+  const router = useRouter();
+
+  /**
+   * One sequence per mounted view, so a read issued here can only be superseded by a
+   * later read from this same view.
+   *
+   * `useState` with the factory itself rather than `useRef(createLatestOnly())`: React
+   * invokes a lazy initialiser once per mount, so exactly one sequence is created as well
+   * as used. The `useRef` form evaluates the factory on every render and throws the result
+   * away, which made the comment above true of what was used and false of what was built.
+   */
+  const [sequence] = useState(createLatestOnly);
+
+  /**
+   * Whether this view has already asked the server to re-decide who is signed in.
+   *
+   * A denied read means the server will now render the sign-in panel instead of this view,
+   * so the fix is to ask it to: `router.refresh()` re-runs the server component that chose
+   * this branch. Without it an adult reads "bitte neu anmelden" on a screen carrying
+   * nothing to sign in with, and has to work out for themselves that a reload is needed.
+   *
+   * Scope of this guard, stated precisely because it is easy to overclaim: it is a ref, so
+   * it is per-MOUNT. It stops two concurrent denied reads from both calling refresh within
+   * one mount. It does NOT bound a mount -> refresh -> mount cycle, because a refresh
+   * remounts this view and the ref starts over.
+   *
+   * What actually guarantees termination is time, not this ref. The page and the route
+   * verify the same cookie through the same gate, so they disagree only in the instant
+   * around expiry - page still granted, route already denied. The next server render is
+   * later than the one that granted, so it lands past the boundary and renders the sign-in
+   * panel, which unmounts this view and ends the sequence. If a loop is ever observed here,
+   * the bug is that the page and the route disagree persistently, and that is a finding to
+   * report rather than something to paper over with a retry counter.
+   */
+  const hasRequestedReauth = useRef(false);
 
   /**
    * Moves the controls and marks the list as loading in the same event.
@@ -79,7 +112,6 @@ export function AdminInboxView() {
   );
 
   const load = useCallback(async (active: AdminFilterState) => {
-    const sequence = sequenceRef.current;
     const ticket = sequence.issue();
 
     try {
@@ -101,12 +133,21 @@ export function AdminInboxView() {
       // empty screen, because it looks like an answer.
       setPage(null);
       setFailure(failureMessages[result.outcome]);
+
+      // Only `denied`. The other outcomes do not mean the session is gone, and refreshing
+      // on `rate-limited` in particular would add load to the exact condition that caused
+      // it. `unavailable`, `invalid-query` and `transport` are all states an adult can act
+      // on from this screen; a lapsed session is the one that needs a different screen.
+      if (result.outcome === "denied" && !hasRequestedReauth.current) {
+        hasRequestedReauth.current = true;
+        router.refresh();
+      }
     } finally {
       // Guarded too. An older read finishing must not lower the flag while the newest is
       // still running, or the page underneath would be presented as the finished answer.
       if (sequence.isLatest(ticket)) setIsLoading(false);
     }
-  }, []);
+  }, [router, sequence]);
 
   useEffect(() => {
     void load(filters);
@@ -211,7 +252,12 @@ export function AdminInboxView() {
       )}
 
       {isLoading || page === null ? (
-        <p role="status">{failure === null ? "Wird geladen …" : ""}</p>
+        // Nothing rather than an empty live region. An empty `role="status"` announces
+        // nothing, so a second one competing with the failure message above is pure noise
+        // for a screen reader - and it made `getByRole("status")`, a strict locator, match
+        // two elements and throw instead of failing usefully. When a failure is showing,
+        // that message is left as the only thing speaking.
+        failure === null ? <p role="status">Wird geladen …</p> : null
       ) : (
         <>
           <p className="admin-count" role="status">

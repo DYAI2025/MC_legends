@@ -344,3 +344,55 @@ test("the sign-in button stays disabled until a code is typed", async ({ page })
   await page.getByLabel("Projekt-Zugangscode").fill("x");
   await expect(submit).toBeEnabled();
 });
+
+test("an expired admin session returns the adult to the sign-in panel", async ({ page }) => {
+  // The most-travelled failure path in this feature: session expiry is how every admin
+  // session normally ends. The view reports "Die Anmeldung gilt nicht mehr. Bitte neu
+  // anmelden." - and until the read side asked the server to re-render, there was nothing
+  // on screen to sign in with. The signed-in/signed-out choice is made in the server
+  // component, so only a refresh can change it; an adult had to independently know to
+  // reload. This case fails without that refresh.
+  await signInAsFamily(page);
+  await submitOneAnswer(page, "e2e-admin-session-expired");
+  await signInAsAdmin(page);
+
+  await page.goto("/admin");
+  await expect(page.locator(".admin-entry").first()).toBeVisible();
+
+  // Drop the admin cookie from under the open page, leaving the family one alone: the
+  // browser now holds exactly what an adult holds after the session lapsed, while the
+  // already-rendered view still believes it may read.
+  const surviving = (await page.context().cookies()).filter(
+    (cookie) => cookie.name !== "avaloria_admin_session",
+  );
+  await page.context().clearCookies();
+  await page.context().addCookies(surviving);
+
+  // Any re-read now answers 401. Moving a filter is how an adult would discover it.
+  await page.getByLabel("Status").selectOption("RECEIVED");
+
+  await expect(page.getByLabel("Projekt-Zugangscode")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Eingegangene Antworten" })).toHaveCount(0);
+});
+
+test("a failed read leaves exactly one live region speaking", async ({ page }) => {
+  // Two `role="status"` elements used to render together on failure - the message, plus a
+  // second, empty one where the loading line would go. An empty live region announces
+  // nothing, so the cost is a screen reader hearing two regions update in one tick. It is
+  // also a test hazard: getByRole("status") is a strict locator, so a second match throws
+  // a strict-mode violation instead of failing usefully.
+  await signInAsAdmin(page);
+  await page.goto("/admin");
+
+  const inbox = page.getByRole("region", { name: "Eingegangene Antworten" });
+  await expect(inbox).toBeVisible();
+
+  // A questionId the route refuses outright: over its 200-character ceiling, so the answer
+  // is 400 invalid-query and the view takes its failure branch.
+  await page.getByLabel("Frage").fill("z".repeat(201));
+
+  await expect(inbox.getByText("Diese Filterkombination ist nicht gültig. Bitte die Auswahl ändern.")).toBeVisible();
+  // The assertion: one region, not two. Counted rather than asserted through a strict
+  // locator, so a regression reports a number instead of throwing.
+  await expect(inbox.locator('[role="status"]')).toHaveCount(1);
+});
