@@ -6,6 +6,14 @@ import {
   type InboxRecord,
   type SubmissionInboxStore,
 } from "@/application/submissions/submission-inbox-store";
+import {
+  MAX_INBOX_PAGE_SIZE,
+  type InboxEntry,
+  type InboxEntryStatus,
+  type InboxPage,
+  type InboxQuery,
+  type SubmissionInboxReader,
+} from "@/application/submissions/submission-inbox-reader";
 
 /** The columns this adapter writes and reads back. Defaults own status and inserted_at. */
 type InboxRow = {
@@ -17,6 +25,9 @@ type InboxRow = {
   receipt_id: string;
   original_text: string;
 };
+
+/** The same row plus the column only the read side selects. */
+type InboxEntryRow = InboxRow & { status: string };
 
 const COLUMNS =
   "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text";
@@ -36,6 +47,25 @@ const INSERT = `
 `;
 
 const SELECT = `SELECT ${COLUMNS} FROM submission_inbox WHERE submission_id = $1`;
+
+/**
+ * The read side's columns: everything the write side round-trips, plus `status`, which
+ * no writer supplies and the schema defaults.
+ */
+const ENTRY_COLUMNS = `${COLUMNS}, status`;
+
+/**
+ * Newest-first, with submission_id as the tiebreaker.
+ *
+ * received_at is not unique - two answers can land in the same millisecond - and without
+ * the second key their relative order is whatever the planner happened to produce, which
+ * can differ between two runs of the same query. An inbox whose "latest" is unstable is
+ * an inbox somebody will page through twice and see different things.
+ *
+ * submission_inbox_received_at_idx and submission_inbox_question_recent_idx were created
+ * by migration 0001 for exactly this query and this filter.
+ */
+const ORDER = " ORDER BY received_at DESC, submission_id DESC";
 
 /**
  * pg-pool 8.16.3 accepts an `onConnect` hook that is awaited before the new client is
@@ -251,14 +281,123 @@ function toRecord(row: InboxRow): InboxRecord {
 }
 
 /**
+ * Same narrowing argument as kindFrom: the `submission_inbox_status_known` CHECK is what
+ * makes this true, and a status the constraint allows but this function does not know
+ * must fail on the row rather than reach the admin view as an untyped string.
+ */
+function statusFrom(value: string): InboxEntryStatus {
+  if (value === "RECEIVED") {
+    return value;
+  }
+
+  throw new Error(`submission_inbox.status holds a value this adapter cannot type: ${value}`);
+}
+
+function toEntry(row: InboxEntryRow): InboxEntry {
+  return {
+    ...toRecord(row),
+    status: statusFrom(row.status),
+  };
+}
+
+/**
+ * Builds the WHERE clause and its bound values together, so a filter can never be added
+ * to one without the other.
+ *
+ * Every value is a placeholder. Not one filter is interpolated into the SQL text - and
+ * `questionId` uses `=` rather than LIKE on purpose: LIKE would make "companion" match
+ * "companion-animal", which widens silently and looks like more answers rather than a
+ * bug.
+ */
+function whereFrom(query: InboxQuery): { sql: string; values: unknown[] } {
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (query.questionId !== undefined) {
+    values.push(query.questionId);
+    clauses.push(`question_id = $${values.length}`);
+  }
+
+  if (query.kind !== undefined) {
+    values.push(query.kind);
+    clauses.push(`kind = $${values.length}`);
+  }
+
+  if (query.status !== undefined) {
+    values.push(query.status);
+    clauses.push(`status = $${values.length}`);
+  }
+
+  return {
+    sql: clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`,
+    values,
+  };
+}
+
+/**
+ * A caller-supplied limit, clamped. Anything that is not a positive integer falls back
+ * to the maximum rather than to nothing: a malformed limit must not render an empty
+ * inbox that reads as "no answers yet".
+ */
+function pageSize(limit: number | undefined): number {
+  if (limit === undefined || !Number.isInteger(limit) || limit <= 0) {
+    return MAX_INBOX_PAGE_SIZE;
+  }
+
+  return Math.min(limit, MAX_INBOX_PAGE_SIZE);
+}
+
+/**
  * Durable store for the family project inbox (MCL-48).
  *
  * Idempotency lives in the primary key on submission_id rather than in this process, so
  * unlike the file adapter it holds across concurrent requests, across app instances and
  * across a crash between the check and the write.
  */
-export class PostgresSubmissionInboxStore implements SubmissionInboxStore {
+export class PostgresSubmissionInboxStore
+  implements SubmissionInboxStore, SubmissionInboxReader
+{
   constructor(private readonly connectionString: string) {}
+
+  /**
+   * MCL-50's protected read.
+   *
+   * The count runs under the same WHERE as the page but without its LIMIT, so a capped
+   * page still reports how much exists. Two statements rather than a window function
+   * because the alternative - `count(*) OVER ()` - returns no count at all when the page
+   * is empty, which is precisely the case where "how many are there" still has a useful
+   * answer.
+   *
+   * Not in a transaction: an entry arriving between the two statements can make the
+   * total one higher than the page explains. For an append-only family inbox that is a
+   * fresher number, not an inconsistent one, and it is not worth holding a snapshot
+   * open on the request path.
+   */
+  async list(query: InboxQuery): Promise<InboxPage> {
+    const pool = poolFor(this.connectionString);
+    const where = whereFrom(query);
+    const limit = pageSize(query.limit);
+
+    const page = await run<InboxEntryRow>(
+      pool,
+      `SELECT ${ENTRY_COLUMNS} FROM submission_inbox${where.sql}${ORDER} LIMIT $${where.values.length + 1}`,
+      [...where.values, limit],
+    );
+
+    const counted = await run<{ total: string }>(
+      pool,
+      `SELECT count(*)::text AS total FROM submission_inbox${where.sql}`,
+      where.values,
+    );
+
+    return {
+      entries: page.rows.map(toEntry),
+      // count(*) is bigint, which pg hands back as a string so a value beyond
+      // Number.MAX_SAFE_INTEGER cannot be silently mangled. Cast in SQL and parsed here
+      // rather than trusting whatever the driver decided a bigint should become.
+      total: Number(counted.rows[0]?.total ?? "0"),
+    };
+  }
 
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {
     const pool = poolFor(this.connectionString);

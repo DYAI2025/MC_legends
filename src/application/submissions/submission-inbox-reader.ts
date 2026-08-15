@@ -1,0 +1,87 @@
+/**
+ * Processing state as the durable store records it.
+ *
+ * Exactly one value today, matching the `submission_inbox_status_known` CHECK in
+ * migration 0001. Widening it is a migration plus a change here, in that order - which
+ * is the point: a writer must not be able to invent a status the database would refuse,
+ * and the admin view must not be able to display one the schema has never heard of.
+ */
+export type InboxEntryStatus = "RECEIVED";
+
+/**
+ * One inbox entry as the protected read side sees it.
+ *
+ * Deliberately a different type from InboxRecord rather than an extension of it.
+ * InboxRecord is the *write* shape: what the POST route mints and hands to the store.
+ * This is the *read* shape, and it carries `status`, which no writer supplies - the
+ * database defaults it. Folding both into one type would mean either the route
+ * pretending to know a status it never sets, or this view treating a required column as
+ * optional.
+ *
+ * `originalText` is the unchanged original artifact. Derived artifacts - transcripts,
+ * normalisations, anything an LLM produces later - are NOT part of this type and must
+ * not be folded into this field. AGENTS.md requires original and derived to stay
+ * separate representations, and a single field carrying either would erase exactly that
+ * distinction at the boundary where somebody is about to read a child's words and
+ * decide what they are.
+ */
+export type InboxEntry = Readonly<{
+  submissionId: string;
+  kind: "text";
+  questionId: string;
+  createdAt: string;
+  receivedAt: string;
+  receiptId: string;
+  originalText: string;
+  status: InboxEntryStatus;
+}>;
+
+/**
+ * Server-side filters. An absent field means no constraint on that dimension, which is
+ * why every one of them is optional rather than nullable: "not filtering by status" and
+ * "filtering by a status that is null" are different questions, and only the first one
+ * exists here.
+ */
+export type InboxQuery = Readonly<{
+  status?: InboxEntryStatus;
+  kind?: "text";
+  questionId?: string;
+  limit?: number;
+}>;
+
+export type InboxPage = Readonly<{
+  entries: readonly InboxEntry[];
+  /**
+   * How many entries match the filter, independent of `limit`.
+   *
+   * Separate from entries.length so a capped page cannot make the view understate how
+   * much exists - "3 answers" when there are 300 is worse than no number at all.
+   */
+  total: number;
+}>;
+
+/**
+ * The largest page any caller can ask for.
+ *
+ * Enforced by the adapter, not by the route: a limit is a memory question, and the
+ * answer must not depend on which caller asked or on a route remembering to clamp it.
+ */
+export const MAX_INBOX_PAGE_SIZE = 200;
+
+/**
+ * Read boundary for the protected inbox (MCL-50).
+ *
+ * A separate port from SubmissionInboxStore rather than another method on it. The write
+ * path is reached by children through the family gate; the read path only by the admin
+ * gate. Two ports make it structurally impossible for a route to acquire read capability
+ * by asking for the writer, and the composition root stays the only place that can hand
+ * out either. One interface with both methods would make that a matter of discipline
+ * instead - and discipline is not what should stand between a child's answer and
+ * whoever can reach the submit endpoint.
+ *
+ * Newest-first ordering is part of the contract, not an adapter's preference: an inbox
+ * that reorders itself between adapters is an inbox whose "latest" cannot be trusted.
+ */
+export interface SubmissionInboxReader {
+  list(query: InboxQuery): Promise<InboxPage>;
+}

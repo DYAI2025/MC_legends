@@ -10,6 +10,24 @@ export const FAMILY_SESSION_COOKIE = "avaloria_family_session";
  * whatever a helper happens to do with a duplicated or malformed pair.
  */
 export function readFamilySessionCookie(cookieHeader: string | null): string | null {
+  return readSessionCookie(cookieHeader, FAMILY_SESSION_COOKIE);
+}
+
+/**
+ * Reads one named session cookie out of a Cookie header.
+ *
+ * Named rather than hard-coded so MCL-50's admin session uses this exact parser instead
+ * of a second one. Two parsers over one header format eventually disagree about a
+ * duplicated or malformed pair, and a disagreement between an auth parser and anything
+ * else is a way in.
+ *
+ * The name is compared exactly. A cookie called `avaloria_admin_session_x` must not
+ * satisfy a request for `avaloria_admin_session`.
+ */
+export function readSessionCookie(
+  cookieHeader: string | null,
+  name: string,
+): string | null {
   if (cookieHeader === null) {
     return null;
   }
@@ -20,7 +38,7 @@ export function readFamilySessionCookie(cookieHeader: string | null): string | n
       continue;
     }
 
-    if (pair.slice(0, separator).trim() !== FAMILY_SESSION_COOKIE) {
+    if (pair.slice(0, separator).trim() !== name) {
       continue;
     }
 

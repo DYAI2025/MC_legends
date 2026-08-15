@@ -6,6 +6,7 @@ import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-su
 import type { FamilyAccessGate } from "@/application/access/family-access";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
+import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
 
@@ -86,6 +87,99 @@ export function createFamilyAccessGate(): FamilyAccessGate {
   });
 }
 
+/**
+ * The admin access gate (MCL-50).
+ *
+ * A DIFFERENT secret from the family gate, not a different call to the same one. The
+ * family access code is what the children hold in order to submit; if the protected
+ * read verified against it, any child with that code could read every sibling's answers
+ * - and the code would look correct, because it would be the same gate and the same
+ * mechanism. The separation is the secret, and it has to live here, in the one module
+ * allowed to name secrets at all.
+ *
+ * An unset or blank admin code produces a gate that answers `unavailable` to
+ * everything, exactly as the family gate does. A missing secret closes the door.
+ *
+ * The session secret is shared with the family gate deliberately: it is signing
+ * material, not an identity, and the identity is already separated by the access code.
+ * Sharing it means one value to rotate rather than two to forget.
+ *
+ * This is an MVP boundary, not a role model. Jira MCL-50 puts the final production role
+ * and consent policy explicitly out of scope; what is here is the narrowest reversible
+ * thing that does not treat a child's write session as an adult's read authority.
+ */
+export function createAdminAccessGate(): FamilyAccessGate {
+  const adminCode = process.env.AVALORIA_ADMIN_ACCESS_CODE?.trim() ?? "";
+  const familyCode = process.env.AVALORIA_FAMILY_ACCESS_CODE?.trim() ?? "";
+
+  // Setting both variables to the same value silently undoes the whole separation, so
+  // that configuration is refused rather than served.
+  //
+  // WHY it undoes it: the two gates are the same HMAC construction over the same
+  // SESSION_KEY_LABEL, and they share AVALORIA_SESSION_SECRET on purpose. The signing key
+  // is therefore derived from (access code, session secret) - and if the access codes are
+  // equal, the two keys are equal, which makes the two token families interchangeable. A
+  // session minted by the family gate then verifies against the admin gate, and any child
+  // holding the family code could read every sibling's answers. Measured: with identical
+  // codes the admin gate answers `granted` to a family-minted token; with distinct codes
+  // it answers `denied`.
+  //
+  // The structurally stronger fix is a per-audience domain label mixed into the
+  // derivation, which would make the collision impossible instead of merely detected.
+  // That changes MCL-34's token derivation and would invalidate every live family
+  // session, so it is deliberately not done in this slice.
+  //
+  // Compared as trimmed plain strings, not as HMACs. The HMAC comparison in the gate
+  // exists because the value on one side is caller-supplied; both values here are
+  // server-side configuration that no request can influence, so there is no oracle to
+  // protect against. Trimmed because HmacFamilyAccessGate trims what it is handed, which
+  // makes two values differing only in surrounding whitespace the same secret.
+  if (adminCode.length > 0 && adminCode === familyCode) {
+    // A fixed string with no interpolation: neither code may reach a log.
+    console.error(
+      "admin access gate unavailable: the admin access code must differ from the family access code",
+    );
+
+    // Fails closed through the gate's own existing unavailable path rather than a new
+    // sentinel, so this misconfiguration answers exactly as a missing admin code does:
+    // 503 from /api/admin/session and from the protected inbox read. The FAMILY gate is
+    // untouched - the children keep submitting.
+    return new HmacFamilyAccessGate({
+      accessCode: undefined,
+      sessionSecret: process.env.AVALORIA_SESSION_SECRET,
+    });
+  }
+
+  return new HmacFamilyAccessGate({
+    accessCode: process.env.AVALORIA_ADMIN_ACCESS_CODE,
+    sessionSecret: process.env.AVALORIA_SESSION_SECRET,
+  });
+}
+
+/**
+ * The read side of the inbox (MCL-50), chosen the same way the write side is.
+ *
+ * Same selection rule as createSubmissionInboxStore on purpose: whichever store the
+ * writes are going to is the one the admin view must read from. Two independent rules
+ * would eventually disagree, and the shape of that disagreement is an inbox that looks
+ * empty while submissions are being accepted - the single most alarming and least
+ * informative failure this feature could have.
+ *
+ * The file branch is not dead code for the same reason it is not dead on the write
+ * side: it is MCL-48's rollback path.
+ */
+export function createSubmissionInboxReader(): SubmissionInboxReader {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresSubmissionInboxStore(url);
+  }
+
+  return new FileSubmissionInboxStore(
+    process.env.AVALORIA_INBOX_DIR?.trim() || DEFAULT_INBOX_DIRECTORY,
+  );
+}
+
 function positiveInteger(raw: string | undefined, fallback: number): number {
   const value = Number(raw?.trim());
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -100,6 +194,9 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
 let protectedRouteLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
 let globalFamilySessionLimiter: RateLimiter | null = null;
+let adminRouteLimiter: RateLimiter | null = null;
+let adminSessionLimiter: RateLimiter | null = null;
+let globalAdminSessionLimiter: RateLimiter | null = null;
 
 export function createProtectedRouteRateLimiter(): RateLimiter {
   protectedRouteLimiter ??= new InMemoryRateLimiter({
@@ -145,8 +242,55 @@ export function createGlobalFamilySessionRateLimiter(): RateLimiter {
  * built from the limits the case just configured, and they must not inherit the
  * attempts of the case before them. Nothing in the running app calls this.
  */
+/**
+ * Its own bucket, not the family route's.
+ *
+ * Sharing one counter would let child submissions exhaust the admin view's allowance
+ * and the other way round - and the admin read is the thing somebody reaches for when
+ * they want to know what is going on, which is exactly when the write path is busiest.
+ */
+export function createAdminRouteRateLimiter(): RateLimiter {
+  adminRouteLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_RATE_LIMIT, 60),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_RATE_WINDOW_MS, 60_000),
+  });
+  return adminRouteLimiter;
+}
+
+/**
+ * Sign-in attempts against the admin code, per caller.
+ *
+ * Its own bucket rather than the family route's: an admin sign-in and a child sign-in
+ * are different secrets with different consequences, and a family sitting on their
+ * allowance must not be able to lock an adult out of the inbox - nor the reverse.
+ */
+export function createAdminSessionRateLimiter(): RateLimiter {
+  adminSessionLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_RATE_LIMIT, 20),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_RATE_WINDOW_MS, 60_000),
+  });
+  return adminSessionLimiter;
+}
+
+/**
+ * The ceiling on admin sign-in attempts for the whole process, whatever address each
+ * attempt claims - the one a spoofed x-forwarded-for cannot reset. Set lower than the
+ * family equivalent because far fewer people hold this code and guessing it is worth
+ * more.
+ */
+export function createGlobalAdminSessionRateLimiter(): RateLimiter {
+  globalAdminSessionLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT, 30),
+    windowMs: positiveInteger(process.env.AVALORIA_ADMIN_SESSION_GLOBAL_RATE_WINDOW_MS, 60_000),
+  });
+  return globalAdminSessionLimiter;
+}
+
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
   familySessionLimiter = null;
   globalFamilySessionLimiter = null;
+  adminRouteLimiter = null;
+  adminSessionLimiter = null;
+  globalAdminSessionLimiter = null;
 }

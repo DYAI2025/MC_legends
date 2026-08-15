@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
 import { describeSubmissionInboxStoreContract } from "./submission-inbox-store-contract";
+import { describeSubmissionInboxReaderContract } from "./submission-inbox-reader-contract";
 
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 
@@ -156,3 +157,15 @@ describeSubmissionInboxStoreContract(
   "FileSubmissionInboxStore",
   async () => new FileSubmissionInboxStore(directory),
 );
+
+// The file store is MCL-48's documented rollback path, so it has to satisfy the MCL-50
+// read contract too. If it could not, taking DATABASE_URL out of app.env - the rollback -
+// would silently take the admin inbox down with it, and the one moment somebody performs
+// a rollback is the worst moment to discover that.
+describeSubmissionInboxReaderContract("FileSubmissionInboxStore", async (seed) => {
+  const store = new FileSubmissionInboxStore(directory);
+  for (const entry of seed) {
+    await store.appendIfAbsent(entry);
+  }
+  return store;
+});

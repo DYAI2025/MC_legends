@@ -61,6 +61,22 @@ describe("architecture boundaries", () => {
     ]);
   });
 
+  it("points the browser admin sign-in at the admin endpoint, not the family one", async () => {
+    // The endpoint string is the entire difference between the two sign-in factories, and
+    // it is not reachable from a unit test without a live fetch - so nothing else in the
+    // suite notices if it changes. Measured: re-pointing the admin factory at
+    // /api/family/session leaves the whole suite green and tsc silent, while making the
+    // admin panel authenticate against the children's gate. That is the one separation
+    // the fail-closed gate in the previous commit exists to protect, so it is asserted at
+    // the level where the mistake is visible: the source.
+    const source = await readFile("src/composition/browser.ts", "utf8");
+
+    expect(source).toContain("/api/admin/session");
+    // And never names the family endpoint: HttpFamilySessionClient defaults to it, so the
+    // only way that string appears here is a factory pointed at the wrong gate.
+    expect(source).not.toContain("/api/family/session");
+  });
+
   it("lets only the domain module name the server acknowledged status", async () => {
     // The bare literal, not an assignment shape: `{ status: ACK }` via a constant and
     // `{ ["status"]: "SERVER_ACKNOWLEDGED" }` both evade a `status:`-anchored pattern.
@@ -78,7 +94,15 @@ describe("architecture boundaries", () => {
     // artifact somebody has to remember to scan.
     await expectNoForbiddenSource(
       "src",
-      [/AVALORIA_FAMILY_ACCESS_CODE/, /AVALORIA_SESSION_SECRET/],
+      [
+        /AVALORIA_FAMILY_ACCESS_CODE/,
+        /AVALORIA_SESSION_SECRET/,
+        // MCL-50's admin code, held to the same rule from the day it exists. A second
+        // secret is a second chance for a component to read one directly and drag it
+        // into the client bundle, and the rule is worth nothing if it only covers the
+        // secrets somebody remembered to add.
+        /AVALORIA_ADMIN_ACCESS_CODE/,
+      ],
       ["src/composition/server.ts"],
     );
   });
@@ -93,6 +117,10 @@ describe("architecture boundaries", () => {
     for (const clientComponent of [
       "src/app/family-experience.tsx",
       "src/app/components/family-access-gate.tsx",
+      // MCL-50. Added with the components themselves: this list is hardcoded, so a
+      // client component missing from it is one the rule silently does not cover.
+      "src/app/components/admin-access-gate.tsx",
+      "src/app/components/admin-inbox-view.tsx",
     ]) {
       await expectNoForbiddenSource(clientComponent, [
         /from ["']@\/composition\/server["']/,
@@ -108,5 +136,27 @@ describe("architecture boundaries", () => {
       /from ["']@\/adapters\//,
       /from ["']@\/app\//,
     ]);
+  });
+
+  it("never lets a test replace the process environment object", async () => {
+    // Measured, not theoretical: `vi.stubEnv` and `vi.unstubAllEnvs` write through a
+    // Proxy whose target is the `process.env` captured when vitest loaded, and that
+    // proxy has no deleteProperty trap. Its get/set traps forward to the *current*
+    // process.env, but an unset - `stubEnv(name, undefined)`, and the delete branch of
+    // `unstubAllEnvs` - deletes from the target. Once a test assigns to `process.env`,
+    // target and current object are two different objects, so every later unset
+    // silently stops unsetting while reads and writes keep working. A fail-closed case
+    // then passes alone and grants in a shared-process run.
+    //
+    // Today only vitest's fork-per-file isolation hides that - a runner setting, not
+    // test hygiene. Measured on this repo with `isolate: false` and a single fork: 7
+    // failures across 2 files, of which 6 were MCL-50's own admin-inbox cases. Once
+    // inbox-route's afterEach had replaced process.env, health-ready-route's unreachable
+    // DATABASE_URL could no longer be unstubbed, so the admin read reached for
+    // PostgreSQL at 127.0.0.1:1 instead of the file store and answered 503.
+    //
+    // A source rule rather than a runtime assertion, because the damage is done in an
+    // afterEach whose own file has already finished asserting.
+    await expectNoForbiddenSource("tests", [/^\s*process\.env\s*=[^=]/mu]);
   });
 });
