@@ -5,8 +5,12 @@ import {
   categoryFilterFromSlug,
   categorySlugFor,
   childCategories,
+  ideaAnchorId,
   ideaById,
+  ideaDetailHref,
+  overviewHref,
   relatedIdeas,
+  THEMA_PARAM,
 } from "@/content/avaloria-content";
 import { expectChildSafe } from "../support/child-safe";
 
@@ -45,6 +49,49 @@ describe("category slugs", () => {
   it("keeps every filter label free of project jargon", () => {
     for (const filter of allCategoryFilters) {
       expectChildSafe(filter, `filter ${filter}`);
+    }
+  });
+});
+
+describe("addresses", () => {
+  function themaOf(href: string): string | undefined {
+    return new URL(href, "https://example.invalid").searchParams.get(THEMA_PARAM) ?? undefined;
+  }
+
+  it("round-trips every filter through the overview address", () => {
+    for (const filter of allCategoryFilters) {
+      expect(categoryFilterFromSlug(themaOf(overviewHref(filter))), filter).toBe(filter);
+    }
+  });
+
+  it("leaves the default filter out of the address", () => {
+    // "/" is what an adult hands a child. It has to keep meaning the whole world.
+    expect(overviewHref("Alle Ideen")).toBe("/");
+    expect(themaOf(overviewHref("Alle Ideen"))).toBeUndefined();
+  });
+
+  it("points the overview address at one card when asked", () => {
+    expect(overviewHref("Alle Ideen", "creatures-druhen")).toBe("/#idee-creatures-druhen");
+    expect(overviewHref("Wesen & Figuren", "creatures-druhen")).toBe(
+      "/?thema=wesen-und-figuren#idee-creatures-druhen",
+    );
+    expect(ideaAnchorId("creatures-druhen")).toBe("idee-creatures-druhen");
+  });
+
+  it("carries the chosen filter into every idea's own address", () => {
+    for (const idea of avaloriaIdeas) {
+      const href = ideaDetailHref(idea.id, idea.childCategory);
+      expect(new URL(href, "https://example.invalid").pathname).toBe(`/welt/${idea.id}`);
+      expect(categoryFilterFromSlug(themaOf(href)), idea.id).toBe(idea.childCategory);
+    }
+  });
+
+  it("gets a child back to the filter they came from", () => {
+    // The whole point of the round trip: overview -> detail -> overview loses nothing.
+    for (const filter of allCategoryFilters) {
+      const detail = ideaDetailHref("creatures-druhen", filter);
+      const back = overviewHref(categoryFilterFromSlug(themaOf(detail)), "creatures-druhen");
+      expect(back, filter).toBe(overviewHref(filter, "creatures-druhen"));
     }
   });
 });

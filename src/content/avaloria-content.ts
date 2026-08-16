@@ -243,6 +243,34 @@ export function categoryFilterFromSlug(slug: string | undefined): CategoryFilter
   return match ?? allIdeasFilter;
 }
 
+/** The one name the chosen topic travels under. Written once, read by both surfaces. */
+export const THEMA_PARAM = "thema";
+
+/** The id a card carries so an address can point back at that exact card. */
+export function ideaAnchorId(ideaId: string): string {
+  return `idee-${ideaId}`;
+}
+
+/**
+ * The overview, optionally filtered and optionally pointing at one card. The default
+ * filter is left out of the address on purpose: "/" is what a child is given by an
+ * adult, and it has to keep meaning the whole world without a parameter explaining it.
+ */
+export function overviewHref(filter: CategoryFilter, anchorIdeaId?: string): string {
+  const query = filter === allIdeasFilter ? "" : `?${THEMA_PARAM}=${categorySlugFor(filter)}`;
+  const anchor = anchorIdeaId === undefined ? "" : `#${ideaAnchorId(anchorIdeaId)}`;
+  return `/${query}${anchor}`;
+}
+
+/**
+ * One idea's own page. It carries the topic the child was looking at, so the way back is
+ * a fact the address already knows rather than something the detail page has to guess.
+ */
+export function ideaDetailHref(ideaId: string, filter: CategoryFilter): string {
+  const query = filter === allIdeasFilter ? "" : `?${THEMA_PARAM}=${categorySlugFor(filter)}`;
+  return `/welt/${ideaId}${query}`;
+}
+
 export function ideaById(id: string): AvaloriaIdea | undefined {
   return avaloriaIdeas.find((idea) => idea.id === id);
 }
