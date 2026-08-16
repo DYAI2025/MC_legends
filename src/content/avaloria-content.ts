@@ -24,6 +24,14 @@ export type AvaloriaIdea = Readonly<{
   source: SourceReference;
 }>;
 
+/**
+ * What the overview can be filtered to. "Alle Ideen" is a filter, not a category: no
+ * entry carries it, and nothing may ever be authored into it.
+ */
+export type CategoryFilter = ChildCategory | "Alle Ideen";
+
+export const allIdeasFilter = "Alle Ideen" satisfies CategoryFilter;
+
 export const childCategories = [
   { label: "Geschichte & Welt", icon: "✦", description: "Orte, Reisen und die große Geschichte" },
   { label: "Wesen & Figuren", icon: "◈", description: "Freunde, Tiere und andere Wesen" },
@@ -202,3 +210,50 @@ export const avaloriaIdeas: ReadonlyArray<AvaloriaIdea> = [
     source: jiraSource("MCL-11", "Echtzeitkalender, globale Events und Offline-Fairness"),
   },
 ];
+
+/**
+ * Total lookup: a new child category without a slug is a compile error. These strings
+ * end up in the address bar - they are what a child comes back to when they press the
+ * back button, so they have to be stable, lowercase and free of the umlauts and
+ * ampersands the labels carry.
+ */
+const categorySlugs = {
+  "Alle Ideen": "alle",
+  "Geschichte & Welt": "geschichte-und-welt",
+  "Wesen & Figuren": "wesen-und-figuren",
+  "Quests & Abenteuer": "quests-und-abenteuer",
+  "Ausrüstung & Bauen": "ausruestung-und-bauen",
+  "Gemeinsam spielen": "gemeinsam-spielen",
+  "Offene Ideen": "offene-ideen",
+} as const satisfies Record<CategoryFilter, string>;
+
+/** Derived from the slug table, so it can never fall out of sync with CategoryFilter. */
+export const allCategoryFilters = Object.keys(categorySlugs) as ReadonlyArray<CategoryFilter>;
+
+export function categorySlugFor(filter: CategoryFilter): string {
+  return categorySlugs[filter];
+}
+
+/**
+ * Anything unrecognised reads as "Alle Ideen". A truncated, hand-typed or stale address
+ * has to show a child the whole world - never an empty grid, never an error page.
+ */
+export function categoryFilterFromSlug(slug: string | undefined): CategoryFilter {
+  const match = allCategoryFilters.find((filter) => categorySlugs[filter] === slug);
+  return match ?? allIdeasFilter;
+}
+
+export function ideaById(id: string): AvaloriaIdea | undefined {
+  return avaloriaIdeas.find((idea) => idea.id === id);
+}
+
+/**
+ * The other entries the project already files under the same owner topic. Derived, never
+ * authored: this states no relationship the dataset does not already carry, so it cannot
+ * become a place where new game lore quietly appears.
+ */
+export function relatedIdeas(idea: AvaloriaIdea): ReadonlyArray<AvaloriaIdea> {
+  return avaloriaIdeas.filter(
+    (other) => other.id !== idea.id && other.internalCategory === idea.internalCategory,
+  );
+}
