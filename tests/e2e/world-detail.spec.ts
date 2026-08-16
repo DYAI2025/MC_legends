@@ -228,15 +228,25 @@ test.describe("D - back navigation", () => {
     page,
   }) => {
     await page.goto("/");
+    const entriesBefore = await page.evaluate(() => history.length);
+
     for (const category of ["Wesen & Figuren", "Quests & Abenteuer", filterUnderTest] as const) {
       await page.getByRole("button", { name: category, pressed: false }).click();
       await expect(page.getByRole("button", { name: category, pressed: true })).toBeVisible();
     }
 
+    // The measurement this case exists for. Trying topics is browsing, not travelling:
+    // it must leave nothing behind for the back button to walk through. Measured with
+    // router.push instead of router.replace, this is entriesBefore + 3, and a child who
+    // tried three topics has to press back four times to leave the page.
+    expect(
+      await page.evaluate(() => history.length),
+      "choosing a topic must not add a history entry",
+    ).toBe(entriesBefore);
+
+    // And one step really is enough to get back from the tile they then opened.
     await cardFor(page, ideaInFilter).click();
     await expect(detailTitle(page, ideaInFilter)).toBeVisible();
-
-    // One back step, not three: the chips replace the entry instead of stacking onto it.
     await page.goBack();
     await expect(page.getByRole("button", { name: filterUnderTest, pressed: true })).toBeVisible();
   });
