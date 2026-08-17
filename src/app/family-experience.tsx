@@ -80,16 +80,36 @@ export function FamilyExperience({
   );
 
   /**
-   * Coming back from a tile, the card that was opened takes focus. Explicit rather than
-   * left to the browser's fragment handling: which element a browser focuses for a hash
-   * is not the same everywhere, and "the keyboard is where the child left it" is a
-   * promise this page makes, not one it may borrow. Runs once per mount - arriving at the
-   * overview is exactly one mount, whether by back link, back button or a pasted address.
+   * Coming back from a tile, the card that was opened takes focus and comes back on
+   * screen. Explicit rather than left to the browser's fragment handling: which element a
+   * browser focuses for a hash is not the same everywhere, and "the keyboard is where the
+   * child left it" is a promise this page makes, not one it may borrow. Runs once per
+   * mount - arriving at the overview is exactly one mount, whether by back link, back
+   * button or a pasted address.
+   *
+   * The scroll is taken away from `focus()` and made instant on purpose, because focus
+   * alone only guarantees the keyboard, not the eyes. `focus()` scrolls with the page's
+   * own `scroll-behavior`, which is `smooth`, so restoring a card near the bottom of the
+   * grid became half a second of travel - and a moving scroll is cancelled by the next
+   * scroll input. Handing the keyboard back is precisely an invitation to press a key, so
+   * the child cancelled their own way back: measured on the deployed build, one arrow key
+   * left the page at scrollY 40 with the card at 1520 in a 720px viewport, focused and
+   * invisible. Next 16 is where this began - earlier versions forced `scroll-behavior`
+   * to `auto` for the duration of a route transition and no longer do
+   * (node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md, "Scroll
+   * Behavior Override").
+   *
+   * `instant` rather than `auto`: `auto` means "whatever the CSS says", which is the
+   * animation this is getting rid of. `center` rather than `start` so the card arrives
+   * where a child is looking instead of flush against the top edge.
    */
   useEffect(() => {
     const anchor = window.location.hash.slice(1);
     if (!anchor.startsWith("idee-")) return;
-    document.getElementById(anchor)?.focus();
+    const card = document.getElementById(anchor);
+    if (card === null) return;
+    card.focus({ preventScroll: true });
+    card.scrollIntoView({ behavior: "instant", block: "center" });
   }, []);
 
   /**
