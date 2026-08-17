@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { deliverSubmission } from "@/application/submissions/deliver-submission";
 import { submitText } from "@/application/submissions/submit-text";
@@ -16,10 +18,13 @@ import { childFailureMessage, childMessageFor } from "@/app/child-submission-mes
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
 import {
+  allIdeasFilter,
   avaloriaIdeas,
   childCategories,
-  type ChildCategory,
+  ideaAnchorId,
+  type CategoryFilter,
 } from "@/content/avaloria-content";
+import { ideaDetailRoute, overviewRoute } from "@/app/world-routes";
 import {
   childStatusFor,
   childStatusLegend,
@@ -42,10 +47,20 @@ export type FamilyExperienceProps = Readonly<{
    * this flag is right or not.
    */
   familySessionActive: boolean;
+  /**
+   * Which topic is shown, decided by the server from the address. MCL-47: not local
+   * state, because a child who opens a tile and comes back - with this page's back link
+   * or with the browser's own - has to find the same topic they left. Two copies of that
+   * answer would be two chances for them to disagree.
+   */
+  selectedCategory: CategoryFilter;
 }>;
 
-export function FamilyExperience({ familySessionActive }: FamilyExperienceProps) {
-  const [selectedCategory, setSelectedCategory] = useState<ChildCategory | "Alle Ideen">("Alle Ideen");
+export function FamilyExperience({
+  familySessionActive,
+  selectedCategory,
+}: FamilyExperienceProps) {
+  const router = useRouter();
   const [answer, setAnswer] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -58,11 +73,33 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
   );
   const visibleIdeas = useMemo(
     () =>
-      selectedCategory === "Alle Ideen"
+      selectedCategory === allIdeasFilter
         ? avaloriaIdeas
         : avaloriaIdeas.filter((idea) => idea.childCategory === selectedCategory),
     [selectedCategory],
   );
+
+  /**
+   * Coming back from a tile, the card that was opened takes focus. Explicit rather than
+   * left to the browser's fragment handling: which element a browser focuses for a hash
+   * is not the same everywhere, and "the keyboard is where the child left it" is a
+   * promise this page makes, not one it may borrow. Runs once per mount - arriving at the
+   * overview is exactly one mount, whether by back link, back button or a pasted address.
+   */
+  useEffect(() => {
+    const anchor = window.location.hash.slice(1);
+    if (!anchor.startsWith("idee-")) return;
+    document.getElementById(anchor)?.focus();
+  }, []);
+
+  /**
+   * `replace`, not `push`: trying three topics before opening a tile must not put three
+   * entries between the child and the way back. `scroll: false` keeps the grid where they
+   * were reading it instead of jumping to the top of the page.
+   */
+  function chooseCategory(category: CategoryFilter) {
+    router.replace(overviewRoute(category), { scroll: false });
+  }
 
   const refreshSubmissions = useCallback(
     () =>
@@ -209,9 +246,9 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
         </div>
         <div className="category-row" aria-label="Themen auswählen">
           <button
-            className={`category-chip ${selectedCategory === "Alle Ideen" ? "is-selected" : ""}`}
-            aria-pressed={selectedCategory === "Alle Ideen"}
-            onClick={() => setSelectedCategory("Alle Ideen")}
+            className={`category-chip ${selectedCategory === allIdeasFilter ? "is-selected" : ""}`}
+            aria-pressed={selectedCategory === allIdeasFilter}
+            onClick={() => chooseCategory(allIdeasFilter)}
             type="button"
           >
             Alle Ideen
@@ -221,7 +258,7 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
               className={`category-chip ${selectedCategory === category.label ? "is-selected" : ""}`}
               aria-pressed={selectedCategory === category.label}
               key={category.label}
-              onClick={() => setSelectedCategory(category.label)}
+              onClick={() => chooseCategory(category.label)}
               type="button"
             >
               <span aria-hidden="true">{category.icon}</span> {category.label}
@@ -232,17 +269,34 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
           {visibleIdeas.map((idea) => {
             const status = childStatusPresentationFor(childStatusFor(idea.truthStatus));
             return (
-              <article className="idea-card" key={idea.id}>
-                <div className="idea-card-topline">
+              // MCL-47: the whole tile, not a link sitting inside a card. A link gives a
+              // child mouse, touch, keyboard, focus and Enter for free - a div with a
+              // click handler would need role, tabindex and a key handler to imitate
+              // half of that, and would still not be a place the browser can go back to.
+              <Link
+                className="idea-card"
+                href={ideaDetailRoute(idea.id, selectedCategory)}
+                id={ideaAnchorId(idea.id)}
+                key={idea.id}
+              >
+                <span className="idea-card-topline">
                   <span className={`idea-status status-${status.id}`}>
                     <span aria-hidden="true">{status.icon}</span> {status.label}
                   </span>
                   <span className="idea-category">{idea.childCategory}</span>
-                </div>
+                </span>
                 <h3>{idea.title}</h3>
                 <p>{idea.summary}</p>
                 <span className="idea-owner">Thema: {childTopicLabelFor(idea.internalCategory)}</span>
-              </article>
+                {/*
+                  The promise the card makes before it is opened. Always readable rather
+                  than revealed on hover, because a touch screen has no hover at all - the
+                  pointer and keyboard states only make it move, they do not create it.
+                */}
+                <span className="idea-more">
+                  Mehr entdecken <span className="idea-more-arrow" aria-hidden="true">→</span>
+                </span>
+              </Link>
             );
           })}
         </div>

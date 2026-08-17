@@ -8,6 +8,8 @@ const required = [
   "next.config.ts",
   "eslint.config.mjs",
   "src/app/page.tsx",
+  "src/app/welt/[id]/page.tsx",
+  "src/app/components/idea-emblem.tsx",
   "src/content/content-source.ts",
   "src/content/avaloria-content.ts",
   "src/content/open-questions.ts",
