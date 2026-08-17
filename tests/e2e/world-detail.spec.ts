@@ -185,6 +185,14 @@ test.describe("C - small screens", () => {
 
 test.describe("D - back navigation", () => {
   const ideaInFilter = filteredIdeas[1];
+  /**
+   * The card that is furthest down the filtered grid, so "the child is back where they
+   * were" has to mean scrolling and cannot be satisfied by a card that happened to be on
+   * screen anyway. Picked by position rather than by name: whichever element the dataset
+   * puts last is the one the test wants, and the precondition below refuses to run if
+   * that element is on screen at the top of the page after all.
+   */
+  const deepIdeaInFilter = filteredIdeas[filteredIdeas.length - 1];
 
   test("the page's own back link returns the topic, the card and the keyboard", async ({ page }) => {
     await page.goto("/");
@@ -207,6 +215,110 @@ test.describe("D - back navigation", () => {
     const card = cardFor(page, ideaInFilter);
     await expect(card).toBeInViewport();
     await expect(card).toBeFocused();
+  });
+
+  /**
+   * The same promise for a card the child had to scroll down to reach.
+   *
+   * The case above cannot make that promise: its card sits near the top of the filtered
+   * grid and is on screen whether anything scrolled or not, so it passes without the way
+   * back ever having moved the page. This one starts from a card that is genuinely out of
+   * sight, which is what the deployed defect was reported against.
+   *
+   * Honest about what it does and does not catch: this case passed at 7469bb2, before the
+   * repair, because it waits and the restoring scroll did eventually arrive - roughly
+   * 600ms later, animated. The case below is the one that fails there. Both are kept: this
+   * one pins that a deep card is restored at all, that one pins that it is restored in a
+   * way a child cannot destroy.
+   *
+   * No pixel in this test is asserted. The precondition proves the card is genuinely off
+   * screen for this viewport, and the assertions afterwards are the four things a child
+   * would notice: their topic, their card, their keyboard, and being able to see it.
+   */
+  test("the back link brings a card from far down the grid back on screen", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: filterUnderTest, pressed: false }).click();
+    await expect(page.getByRole("button", { name: filterUnderTest, pressed: true })).toBeVisible();
+    await expect(page.locator(".idea-card")).toHaveCount(filteredIdeas.length);
+
+    /**
+     * The precondition the whole case rests on, checked in the state the way back
+     * actually lands in: the top of the overview. Reaching a chip scrolls the page - the
+     * grid begins below the hero - so the top is restored first, and from there this card
+     * has to be out of sight. If a content or layout change ever brought it on screen
+     * here, the case fails loudly instead of passing while proving nothing.
+     */
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const card = cardFor(page, deepIdeaInFilter);
+    await expect(
+      card,
+      "the fixture has to be a card the child cannot see from the top of the overview",
+    ).not.toBeInViewport();
+
+    await card.click();
+    await expect(detailTitle(page, deepIdeaInFilter)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`thema=${categorySlugFor(filterUnderTest)}`));
+
+    await page.getByRole("link", { name: /Zurück zu den Ideen/ }).first().click();
+
+    // Their topic and their grid.
+    await expect(page.getByRole("button", { name: filterUnderTest, pressed: true })).toBeVisible();
+    await expect(page.locator(".idea-card")).toHaveCount(filteredIdeas.length);
+    // Their card: addressed, holding the keyboard, and where they can see it. Focus
+    // without sight is the production defect this case pins.
+    await expect(page).toHaveURL(new RegExp(`#${ideaAnchorId(deepIdeaInFilter.id)}$`));
+    await expect(cardFor(page, deepIdeaInFilter)).toBeFocused();
+    await expect(cardFor(page, deepIdeaInFilter)).toBeInViewport();
+  });
+
+  /**
+   * The same way back, for the child who does not wait.
+   *
+   * Restoring the card by moving the page is not one event but half a second of travel:
+   * `html { scroll-behavior: smooth }` turns the jump back down to the grid into an
+   * animation, and an animated scroll is cancelled by the next scroll input. Handing the
+   * keyboard back to the child and then needing them to keep their hands still is not a
+   * promise this page can keep - restoring focus is precisely an invitation to press a
+   * key.
+   *
+   * Measured on the production build at 7469bb2: pressing one arrow key as focus landed
+   * left the page at scrollY 40 with the card's top edge at 1520 in a 720px viewport,
+   * still focused and still out of sight. That reproduces what the deployed build was
+   * reported to do - scrollY 61, card top 1493, document.activeElement.id
+   * idee-world-kings-castle. Left alone, the same run settled at scrollY 1308 about 600ms
+   * later, which is why every test written before this one passed.
+   */
+  test("a child who uses the keyboard on arrival keeps their card", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: filterUnderTest, pressed: false }).click();
+    await expect(page.locator(".idea-card")).toHaveCount(filteredIdeas.length);
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const card = cardFor(page, deepIdeaInFilter);
+    await expect(
+      card,
+      "the fixture has to be a card the child cannot see from the top of the overview",
+    ).not.toBeInViewport();
+
+    await card.click();
+    await expect(detailTitle(page, deepIdeaInFilter)).toBeVisible();
+
+    await page.getByRole("link", { name: /Zurück zu den Ideen/ }).first().click();
+
+    // The moment the card has the keyboard, the child uses it. Waiting on focus rather
+    // than on a delay keeps this a fact about the page and not about how fast the
+    // machine running it happens to be.
+    await page.waitForFunction(
+      (anchorId) => document.activeElement?.id === anchorId,
+      ideaAnchorId(deepIdeaInFilter.id),
+    );
+    await page.keyboard.press("ArrowDown");
+
+    // Their topic, their card, their keyboard - and their card still on screen.
+    await expect(page.getByRole("button", { name: filterUnderTest, pressed: true })).toBeVisible();
+    await expect(page.locator(".idea-card")).toHaveCount(filteredIdeas.length);
+    await expect(cardFor(page, deepIdeaInFilter)).toBeFocused();
+    await expect(cardFor(page, deepIdeaInFilter)).toBeInViewport();
   });
 
   test("the browser's own back button returns the topic too", async ({ page }) => {
