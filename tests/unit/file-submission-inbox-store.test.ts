@@ -1,3 +1,4 @@
+import { fstatSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -239,6 +240,94 @@ describe("FileSubmissionInboxStore durability", () => {
       releaseSync();
       await expect(pending).resolves.toEqual({ stored: true });
     } finally {
+      sync.mockRestore();
+    }
+  });
+
+  /**
+   * The case above holds the FIRST sync and so proves only that *some* fsync is awaited.
+   * It stays green if the directory fsync is fired and forgotten, which is the half that
+   * protects the file's entry rather than its bytes.
+   *
+   * This one lets the data-file fsync finish, then holds the SECOND call - identified as
+   * the directory by fstat on the handle being synced, not by call order alone - and
+   * proves `appendIfAbsent` is still unsettled after the event loop has been drained.
+   * Measured 2026-08-18: with `await directory.sync()` reduced to `directory.sync()`,
+   * this case fails on `expect(settled).toBe(false)` while the directory fsync is held.
+   */
+  it("keeps stored unresolved while the directory fsync - the second one - is held", async () => {
+    const prototype = await fileHandlePrototype();
+    const realSync = prototype.sync;
+
+    let calls = 0;
+    let firstCompleted = false;
+    let secondWasDirectory: boolean | null = null;
+
+    let markSecondReached = (): void => {};
+    const secondReached = new Promise<void>((resolve) => {
+      markSecondReached = resolve;
+    });
+    let releaseSecond = (): void => {};
+    const secondHeld = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+
+    const sync = vi.spyOn(prototype, "sync").mockImplementation(async function (
+      this: FileHandle,
+    ): Promise<void> {
+      calls += 1;
+
+      if (calls === 1) {
+        // The data-file fsync runs for real and to completion: this test is about what
+        // happens after it, so it must not be the thing being waited on.
+        await realSync.call(this);
+        firstCompleted = true;
+        return;
+      }
+
+      // Which handle this is, asked of the descriptor rather than assumed from the
+      // order, so the case fails loudly if the second sync ever stops being the
+      // directory instead of quietly guarding the wrong call. Synchronous on purpose:
+      // it runs before this mock yields, so it cannot race a close that a non-awaiting
+      // implementation would already have started.
+      secondWasDirectory = fstatSync(this.fd).isDirectory();
+      markSecondReached();
+      await secondHeld;
+      // Still the real fsync in the end - the filesystem is never left as a no-op.
+      await realSync.call(this);
+    });
+
+    try {
+      let settled = false;
+      const pending = new FileSubmissionInboxStore(directory)
+        .appendIfAbsent(record())
+        .then((outcome) => {
+          settled = true;
+          return outcome;
+        });
+
+      await secondReached;
+
+      expect(calls).toBe(2);
+      expect(firstCompleted).toBe(true);
+      expect(secondWasDirectory).toBe(true);
+
+      // Drain, not sleep: two turns of the macrotask queue give every already-scheduled
+      // continuation a chance to run. Nothing here waits for a duration, so the result
+      // does not depend on how fast the machine is.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // The bytes are on disk and their fsync has returned; the answer is still withheld
+      // because the entry that makes the file findable is not durable yet.
+      expect(settled).toBe(false);
+
+      releaseSecond();
+      await expect(pending).resolves.toEqual({ stored: true });
+      expect(settled).toBe(true);
+      expect(calls).toBe(2);
+    } finally {
+      releaseSecond();
       sync.mockRestore();
     }
   });
