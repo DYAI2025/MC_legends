@@ -1,5 +1,6 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readInboxRecord } from "./inbox-record-shape";
 import type {
   AppendOutcome,
   InboxRecord,
@@ -107,13 +108,53 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
       }
 
       await mkdir(this.directory, { recursive: true });
-      await appendFile(this.path(), `${JSON.stringify(record)}\n`, "utf8");
+      await this.durablyAppend(`${JSON.stringify(record)}\n`);
       return { stored: true } as const;
     });
   }
 
   private path(): string {
     return join(this.directory, FILE_NAME);
+  }
+
+  /**
+   * Appends one line and does not resolve until the operating system says it is on the
+   * storage device.
+   *
+   * `appendFile` resolves once the bytes are in the page cache. The POST route answers
+   * 201 with "the record is durably appended before this answer is sent", and this
+   * adapter is the path the app falls back to when DATABASE_URL is removed - the one
+   * situation where a crash is already on somebody's mind. A cached write means a child
+   * can hold a receipt for an answer the machine forgot, which is worse than a refusal
+   * because nothing looks wrong.
+   *
+   * Two fsyncs, not one. The first makes the *line* durable; the second makes the
+   * file's directory entry durable, without which a crash after the very first append
+   * can lose the whole file even though its contents were synced. One extra fsync per
+   * submission is the right trade for a family inbox measured in kilobytes.
+   *
+   * What this does NOT promise: that the drive itself has flushed its write cache. On
+   * macOS that needs F_FULLFSYNC, which node exposes no API for. This asks the kernel
+   * for everything the platform makes available and reports success only after it
+   * answers - the remaining gap is the platform's, not this adapter's.
+   */
+  private async durablyAppend(line: string): Promise<void> {
+    const handle = await open(this.path(), "a");
+    try {
+      await handle.writeFile(line, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    // Opened read-only: fsync on a directory descriptor is what persists the entry, and
+    // nothing here writes to the directory itself.
+    const directory = await open(this.directory, "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
   }
 
   /**
@@ -155,11 +196,17 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
     }
 
     const records: InboxRecord[] = [];
+    /** One entry per skipped line: its number and the reason keys, never its content. */
+    const damaged: string[] = [];
+    const lines = content.split("\n");
 
-    for (const line of content.split("\n")) {
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
       if (line.length === 0) {
         continue;
       }
+
+      const lineNumber = index + 1;
 
       let parsed: unknown;
       try {
@@ -167,10 +214,34 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
       } catch {
         // A line this adapter cannot have written is not a match for anything. Skipped
         // rather than thrown, so one damaged line cannot block every later submission.
+        damaged.push(`${lineNumber}: not-json`);
         continue;
       }
 
-      records.push(parsed as InboxRecord);
+      // Checked, not cast. Valid JSON of the wrong shape gets exactly the same policy
+      // as invalid JSON, and for the same reason: this adapter is MCL-48's rollback
+      // path, and the moment somebody reaches for it is the worst possible moment for
+      // one damaged line to block every later submission. "Fail closed" here means the
+      // line never counts as a record - it cannot answer a duplicate check, cannot
+      // produce a receipt and cannot appear in the admin list - not that the request
+      // fails.
+      const checked = readInboxRecord(parsed);
+      if (!checked.ok) {
+        damaged.push(`${lineNumber}: ${checked.defects.join(",")}`);
+        continue;
+      }
+
+      records.push(checked.record);
+    }
+
+    if (damaged.length > 0) {
+      // Once per read, not once per line, and reason keys rather than content: a damaged
+      // line can still hold a child's own words. Skipping silently is what would make
+      // this dangerous - the file would keep working while holding data nobody is told
+      // is unreadable.
+      console.error(
+        `submission inbox file holds unreadable line(s) - ${this.path()} - ${damaged.join("; ")}`,
+      );
     }
 
     return records;

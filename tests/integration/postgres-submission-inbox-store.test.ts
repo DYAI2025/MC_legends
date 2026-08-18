@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   closePostgresSubmissionInboxPools,
   PostgresSubmissionInboxStore,
@@ -13,6 +13,10 @@ import {
   inboxRecord,
 } from "../unit/submission-inbox-store-contract";
 import { describeSubmissionInboxReaderContract } from "../unit/submission-inbox-reader-contract";
+import {
+  lockSubmissionInboxTable,
+  unlockSubmissionInboxTable,
+} from "../support/submission-inbox-table-lock";
 
 /**
  * A real PostgreSQL is the whole point of this file. `ON CONFLICT` holding under two
@@ -54,6 +58,14 @@ async function createStore(): Promise<SubmissionInboxStore> {
   return new PostgresSubmissionInboxStore(CONNECTION_STRING);
 }
 
+// The table is shared with tests/integration/import-inbox-jsonl.test.ts, which also
+// TRUNCATEs it. Vitest runs files in parallel, so both take the same advisory lock.
+beforeAll(async () => {
+  if (ENABLED) {
+    await lockSubmissionInboxTable(CONNECTION_STRING);
+  }
+});
+
 afterAll(async () => {
   if (inspector !== null) {
     // The table is shared state on a developer's machine, not a temp directory that
@@ -63,6 +75,7 @@ afterAll(async () => {
     inspector = null;
   }
   await closePostgresSubmissionInboxPools();
+  await unlockSubmissionInboxTable();
 });
 
 describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
