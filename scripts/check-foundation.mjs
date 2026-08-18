@@ -24,6 +24,7 @@ const required = [
   "src/application/access/rate-limiter.ts",
   "src/adapters/persistence/indexeddb-submission-repository.ts",
   "src/adapters/persistence/file-submission-inbox-store.ts",
+  "src/adapters/persistence/inbox-record-shape.ts",
   "src/adapters/persistence/postgres-submission-inbox-store.ts",
   "src/adapters/http/http-submission-inbox.ts",
   "src/adapters/http/http-family-session-client.ts",
