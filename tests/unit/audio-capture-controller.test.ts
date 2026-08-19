@@ -66,6 +66,17 @@ class FakeRecorder implements MediaRecorderLike {
   }
 }
 
+/**
+ * A recorder that refuses to stop. The real MediaRecorder throws an InvalidStateError
+ * when stop() is called in a state it does not allow, and leaves the microphone exactly
+ * where it was - which is the whole reason the controller catches it.
+ */
+class RefusingRecorder extends FakeRecorder {
+  override stop(): void {
+    throw new Error("stop refused");
+  }
+}
+
 type Harness = Readonly<{
   environment: AudioCaptureEnvironment;
   streams: FakeStream[];
@@ -457,5 +468,191 @@ describe("AudioCaptureController", () => {
     for (const track of stream.getTracks()) expect(track.stopCalls).toBe(1);
     expect(controller.snapshot().phase).toBe("ready");
     expect(world.recorders).toEqual([]);
+  });
+
+  /**
+   * The lifecycle cases below all come from one shape: startRecording() keeps whatever
+   * the child already recorded, so while they re-record the page still offers "Aufnahme
+   * löschen" and the file chooser. Measured on a611fcf, before this was fixed: both of
+   * those controls published a state with no stop button while the microphone stayed
+   * open, and the next start acquired a second stream the first one's stop() never saw.
+   */
+  it("gives the microphone back when a running recording is discarded", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+    await recordOnce(controller, world);
+    const firstUrl = controller.snapshot().recording?.previewUrl;
+
+    await controller.startRecording();
+    expect(controller.snapshot().phase).toBe("recording");
+
+    controller.discard();
+
+    expect(controller.snapshot()).toEqual({ phase: "ready", recording: null, failure: null });
+    expect(world.streams.length).toBe(2);
+    const tracks = world.streams[1]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
+    expect(world.recorders[1]?.state).toBe("inactive");
+    expect(world.revokedUrls).toEqual([firstUrl]);
+    // Nothing was previewed out of the recording that was thrown away mid-flight.
+    expect(world.createdUrls).toEqual([firstUrl]);
+
+    // And exactly one further microphone is taken for the next recording, not two.
+    await recordOnce(controller, world);
+    expect(world.streams.length).toBe(3);
+    expect(controller.snapshot().phase).toBe("recorded");
+  });
+
+  it("gives the microphone back when a chosen file replaces a running recording", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+    await recordOnce(controller, world);
+    const firstUrl = controller.snapshot().recording?.previewUrl;
+
+    await controller.startRecording();
+    const chosen = audioFile("stimme.mp3", "audio/mpeg");
+    controller.chooseFile(chosen);
+
+    const state = controller.snapshot();
+    expect(state.phase).toBe("recorded");
+    expect(state.recording?.source).toBe("file");
+    expect(state.recording?.blob).toBe(chosen);
+    const tracks = world.streams[1]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
+    expect(world.recorders[1]?.state).toBe("inactive");
+    expect(world.revokedUrls).toEqual([firstUrl]);
+    expect(world.createdUrls).toEqual([firstUrl, state.recording?.previewUrl]);
+  });
+
+  it("stays in the recording the child can stop when a refused file arrives", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+    await controller.startRecording();
+
+    controller.chooseFile(new File([new Uint8Array([1])], "katze.png", { type: "image/png" }));
+
+    // The phase is what the page draws the stop button from: it may not move here.
+    expect(controller.snapshot().phase).toBe("recording");
+    expect(controller.snapshot().failure).toBe("file-not-audio");
+    expect(controller.snapshot().recording).toBeNull();
+    expect(world.revokedUrls).toEqual([]);
+    expect(world.createdUrls).toEqual([]);
+    const tracks = world.streams[0]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(0);
+
+    // And the real way out still works, which is the point of keeping the phase.
+    controller.stopRecording();
+    expect(controller.snapshot().phase).toBe("recorded");
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
+  });
+
+  it("stays in a pending permission request when a refused file arrives", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+    const pending = controller.startRecording();
+    expect(controller.snapshot().phase).toBe("requesting-permission");
+
+    controller.chooseFile(new File([new Uint8Array([1])], "katze.png", { type: "image/png" }));
+
+    expect(controller.snapshot().phase).toBe("requesting-permission");
+    expect(controller.snapshot().failure).toBe("file-not-audio");
+
+    // The microphone that was already being asked for still arrives and is used.
+    await pending;
+    expect(controller.snapshot().phase).toBe("recording");
+    expect(world.streams.length).toBe(1);
+  });
+
+  it("gives back a microphone granted after the child discarded the request", async () => {
+    let grant: ((stream: MediaStreamLike) => void) | null = null;
+    const granted = new FakeStream();
+    const world = harness();
+    const controller = new AudioCaptureController({
+      ...world.environment,
+      requestMicrophone: () =>
+        new Promise<MediaStreamLike>((resolve) => {
+          grant = resolve;
+        }),
+    });
+
+    const pending = controller.startRecording();
+    controller.discard();
+    grant!(granted);
+    await pending;
+
+    for (const track of granted.getTracks()) expect(track.stopCalls).toBe(1);
+    expect(world.recorders).toEqual([]);
+    expect(controller.snapshot()).toEqual({ phase: "ready", recording: null, failure: null });
+  });
+
+  it("keeps the chosen file when the microphone it replaced is granted late", async () => {
+    let grant: ((stream: MediaStreamLike) => void) | null = null;
+    const granted = new FakeStream();
+    const world = harness();
+    const controller = new AudioCaptureController({
+      ...world.environment,
+      requestMicrophone: () =>
+        new Promise<MediaStreamLike>((resolve) => {
+          grant = resolve;
+        }),
+    });
+
+    const pending = controller.startRecording();
+    const chosen = audioFile("stimme.mp3", "audio/mpeg");
+    controller.chooseFile(chosen);
+    grant!(granted);
+    await pending;
+
+    for (const track of granted.getTracks()) expect(track.stopCalls).toBe(1);
+    expect(world.recorders).toEqual([]);
+    expect(controller.snapshot().phase).toBe("recorded");
+    expect(controller.snapshot().recording?.blob).toBe(chosen);
+  });
+
+  it("leaves no microphone open and no preview URL alive across a whole session", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+
+    await recordOnce(controller, world);
+    await controller.startRecording();
+    controller.chooseFile(audioFile());
+    await controller.startRecording();
+    controller.discard();
+    await recordOnce(controller, world);
+    controller.release();
+
+    expect(world.streams.length).toBe(4);
+    for (const stream of world.streams) {
+      const tracks = stream.getTracks();
+      expect(tracks.length).toBe(2);
+      for (const track of tracks) expect(track.stopCalls).toBe(1);
+    }
+    // Every URL this session created, revoked once, in the order it stopped being shown.
+    expect(world.revokedUrls).toEqual(world.createdUrls);
+    expect(new Set(world.revokedUrls).size).toBe(world.revokedUrls.length);
+  });
+
+  /**
+   * Asked for in the Sourcery review of PR #28: the guarded branch in stopRecording()
+   * where the recorder itself throws. It is the one stop path that never reaches
+   * onstop, so nothing but this catch hands the microphone back.
+   */
+  it("releases the microphone when the recorder refuses to stop", async () => {
+    const world = harness({ recorders: () => new RefusingRecorder() });
+    const controller = new AudioCaptureController(world.environment);
+    await controller.startRecording();
+
+    controller.stopRecording();
+
+    expect(controller.snapshot().phase).toBe("error");
+    expect(controller.snapshot().failure).toBe("recording-failed");
+    expect(controller.snapshot().recording).toBeNull();
+    expect(world.createdUrls).toEqual([]);
+    const tracks = world.streams[0]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
   });
 });

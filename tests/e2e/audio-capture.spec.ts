@@ -19,6 +19,7 @@ import { signInAsFamily } from "../support/family-session";
 const recorderArea = "Antwort aufnehmen";
 const startButton = "Aufnahme starten";
 const stopButton = "Aufnahme stoppen";
+const reRecordButton = "Neu aufnehmen";
 const discardButton = "Aufnahme löschen";
 const fileChooserLabel = "Oder such eine Tondatei aus";
 
@@ -92,6 +93,13 @@ function recorder(page: Page) {
 
 function player(page: Page) {
   return page.getByLabel("Deine Aufnahme anhören");
+}
+
+/** How many microphone tracks the stub has been asked to give back so far. */
+function stoppedTracks(page: Page): Promise<number> {
+  return page.evaluate(
+    () => (window as unknown as { __stoppedTracks: string[] }).__stoppedTracks.length,
+  );
 }
 
 /** The four bytes below are a WebM header; the file is never decoded, only accepted. */
@@ -211,6 +219,80 @@ test.describe("child audio capture", () => {
     // And the way back is still open: a real audio file is accepted right after.
     await page.setInputFiles("#audio-file", audioFileFixture);
     await expect(player(page)).toBeVisible();
+  });
+
+  /**
+   * While a child re-records, the recording they already have keeps "Aufnahme löschen"
+   * and the file chooser on the page. The three cases below are what those two controls
+   * must do to the microphone that is running behind them.
+   */
+  test("gives the microphone back when a running recording is thrown away", async ({ page }) => {
+    await stubMedia(page, "records");
+    await signInAsFamily(page);
+    await page.goto("/");
+
+    const area = recorder(page);
+    await area.getByRole("button", { name: startButton }).click();
+    await area.getByRole("button", { name: stopButton }).click();
+    await expect(player(page)).toBeVisible();
+
+    await area.getByRole("button", { name: reRecordButton }).click();
+    await expect(area.getByRole("button", { name: stopButton })).toBeVisible();
+
+    await area.getByRole("button", { name: discardButton }).click();
+
+    await expect(player(page)).toHaveCount(0);
+    await expect(area.getByText(audioCapturePhaseMessage("ready"))).toBeVisible();
+    // Two microphones were taken and two were handed back: the one that was stopped,
+    // and the one that was still running when the child threw the recording away.
+    await expect.poll(() => stoppedTracks(page)).toBe(2);
+
+    // And the way back is open, on a microphone that is genuinely free again.
+    await area.getByRole("button", { name: startButton }).click();
+    await expect(area.getByRole("button", { name: stopButton })).toBeVisible();
+  });
+
+  test("gives the microphone back when a chosen file replaces a running recording", async ({
+    page,
+  }) => {
+    await stubMedia(page, "records");
+    await signInAsFamily(page);
+    await page.goto("/");
+
+    const area = recorder(page);
+    await area.getByRole("button", { name: startButton }).click();
+    await area.getByRole("button", { name: stopButton }).click();
+    await expect(player(page)).toBeVisible();
+
+    await area.getByRole("button", { name: reRecordButton }).click();
+    await expect(area.getByRole("button", { name: stopButton })).toBeVisible();
+
+    await page.setInputFiles("#audio-file", audioFileFixture);
+
+    await expect(area.getByText(audioFileFixture.name)).toBeVisible();
+    await expect(area.getByRole("button", { name: stopButton })).toHaveCount(0);
+    await expect.poll(() => stoppedTracks(page)).toBe(2);
+  });
+
+  test("keeps the stop button while a refused file is turned away", async ({ page }) => {
+    await stubMedia(page, "records");
+    await signInAsFamily(page);
+    await page.goto("/");
+
+    const area = recorder(page);
+    await area.getByRole("button", { name: startButton }).click();
+    await expect(area.getByRole("button", { name: stopButton })).toBeVisible();
+
+    await page.setInputFiles("#audio-file", imageFileFixture);
+
+    await expect(area.getByRole("alert")).toHaveText(audioCaptureFailureMessage("file-not-audio"));
+    await expect(area.getByText(audioCapturePhaseMessage("recording"))).toBeVisible();
+    await expect(area.getByRole("button", { name: stopButton })).toBeVisible();
+    expect(await stoppedTracks(page)).toBe(0);
+
+    await area.getByRole("button", { name: stopButton }).click();
+    await expect(player(page)).toBeVisible();
+    await expect.poll(() => stoppedTracks(page)).toBe(1);
   });
 
   test("never claims the recording went anywhere", async ({ page }) => {

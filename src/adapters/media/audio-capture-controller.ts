@@ -273,7 +273,14 @@ export class AudioCaptureController {
     }
   };
 
+  /**
+   * Throwing the recording away also gives up a recording still being made. While the
+   * child re-records, the previous recording keeps this button on the page - and
+   * publishing "ready" without cancelling would leave the microphone open behind a
+   * page that no longer offers a way to stop it.
+   */
   readonly discard = (): void => {
+    this.#cancelCapture();
     this.#revokePreview();
     this.#publish(readyState);
   };
@@ -281,11 +288,17 @@ export class AudioCaptureController {
   readonly chooseFile = (file: Blob & { readonly name?: string }): void => {
     if (!isAudioFile(file)) {
       // Nothing is revoked here: a recording the child already made is theirs to keep,
-      // and a refused file must not take it away from them.
-      this.#fail("file-not-audio");
+      // and a refused file must not take it away from them. Nor may it move a child
+      // out of a recording that is still running: the stop button lives on that phase.
+      if (this.#holdsCapture()) this.#refuseWithoutLeaving("file-not-audio");
+      else this.#fail("file-not-audio");
       return;
     }
 
+    // The chosen file replaces whatever was being recorded, so the microphone behind it
+    // is handed back before the new state is published rather than left running under a
+    // page that now shows a file.
+    this.#cancelCapture();
     this.#revokePreview();
     this.#publish({
       phase: "recorded",
@@ -311,6 +324,21 @@ export class AudioCaptureController {
    * on its own.
    */
   readonly release = (): void => {
+    this.#cancelCapture();
+    this.#revokePreview();
+    this.#state = readyState;
+  };
+
+  /**
+   * Every resource an in-flight capture holds, given back: the acquisition that has not
+   * answered yet, the recorder, the microphone tracks. Publishes nothing - the caller
+   * decides what the child sees next, and release() deliberately shows nothing at all.
+   *
+   * Safe to call when there is no capture: that is the case every caller hits most of
+   * the time, and it must cost nothing but a generation the pending-acquisition guard
+   * will never match.
+   */
+  #cancelCapture(): void {
     this.#generation += 1;
 
     // Handlers first: stopping a recorder fires onstop, and this teardown must not be
@@ -326,11 +354,19 @@ export class AudioCaptureController {
     }
 
     this.#stopStream();
-    this.#revokePreview();
     this.#recorder = null;
     this.#chunks = [];
-    this.#state = readyState;
-  };
+  }
+
+  /**
+   * Whether a capture is still this controller's to give back - an acquisition waiting
+   * for an answer, or a recorder that is running. Read from the published phase because
+   * that is the same thing every caller from outside can see: the phases below are
+   * exactly the two the controller never rests in without owning something.
+   */
+  #holdsCapture(): boolean {
+    return this.#state.phase === "requesting-permission" || this.#state.phase === "recording";
+  }
 
   #finish(): void {
     this.#releaseMicrophone();
@@ -373,6 +409,16 @@ export class AudioCaptureController {
   #fail(failure: AudioCaptureFailureReason): void {
     const recording = this.#state.recording;
     this.#publish({ phase: recording === null ? "error" : "recorded", recording, failure });
+  }
+
+  /**
+   * A failure that took nothing away: the child stays exactly where they were, with one
+   * more sentence. Kept apart from #fail because #fail decides a phase from what is in
+   * hand - correct after a capture has ended, wrong while one is still running, where it
+   * would replace the stop button with a recording the child cannot stop any more.
+   */
+  #refuseWithoutLeaving(failure: AudioCaptureFailureReason): void {
+    this.#publish({ phase: this.#state.phase, recording: this.#state.recording, failure });
   }
 
   #releaseMicrophone(): void {
