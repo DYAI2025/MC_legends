@@ -15,6 +15,7 @@ import {
   type TextSubmission,
 } from "@/domain/submissions/submission";
 import { childFailureMessage, childMessageFor } from "@/app/child-submission-message";
+import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
 import {
@@ -355,6 +356,17 @@ export function FamilyExperience({
             ) : (
               <FamilyAccessGate />
             )}
+            {/*
+              MCL-30A. Behind the same session flag as the answer form: a child without a
+              session sees the question and the world, but is never shown a way to
+              contribute. Absent rather than disabled, for the same reason the textarea
+              is - nothing here invites something this browser may not do.
+
+              A sibling of the form, not a field in it. The recording is not part of the
+              answer that gets sent: there is no server path for audio yet, so putting it
+              inside the form would tie it to a submit button that cannot carry it.
+            */}
+            {familySessionActive ? <AudioAnswerRecorder /> : null}
           </div>
         </div>
 

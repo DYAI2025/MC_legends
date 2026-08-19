@@ -101,6 +101,26 @@ textarea::placeholder { color: #9aa69c; }
 .family-gate input { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); display: block; line-height: 1.5; padding: 13px; width: 100%; }
 .form-footer { align-items: center; display: flex; flex-wrap: wrap; gap: 16px; margin-top: 13px; }
 .form-message { color: #4a824a; font-size: .82rem; font-weight: 800; margin: 14px 0 0; }
+/* MCL-30A child audio capture. Sits in the question card, so it borrows the cards
+   already-warm surface rather than introducing a second visual language. Every state
+   is readable without colour: the sentence says it, the icon repeats it, and the left
+   edge only underlines it. */
+.audio-answer { border-top: 1px solid #f0ddb0; margin-top: 26px; padding-top: 22px; }
+.audio-answer h3 { font-size: 1rem; margin: 0 0 6px; }
+.audio-answer-note { color: var(--muted); font-size: .84rem; line-height: 1.5; margin: 0 0 16px; max-width: 46em; }
+.audio-answer-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.audio-answer-state { align-items: center; background: #fffdf7; border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 12px; display: flex; font-size: .84rem; font-weight: 800; gap: 8px; margin: 14px 0 0; padding: 11px 14px; }
+.audio-answer-state-recording { border-left-color: #c0392b; }
+.audio-answer-state-recorded { border-left-color: #4a824a; }
+.audio-answer-state-error { border-left-color: #c28b23; }
+.audio-answer-problem { background: #fff; border: 1px solid #f0ddb0; border-radius: 12px; color: var(--ink); font-size: .84rem; line-height: 1.5; margin: 10px 0 0; padding: 11px 14px; }
+.audio-answer-preview { margin-top: 14px; }
+.audio-answer-player { display: block; max-width: 100%; width: 380px; }
+.audio-answer-filename { color: var(--muted); font-size: .78rem; font-weight: 700; margin: 8px 0 0; overflow-wrap: anywhere; }
+.audio-answer-file { margin-top: 18px; }
+.audio-answer-file input { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); font: inherit; font-size: .84rem; padding: 11px; width: 100%; }
+.audio-answer-file input:focus-visible { outline: 3px solid #e3ad38; outline-offset: 3px; }
+
 .upcoming-questions { margin-top: 24px; }
 .upcoming-questions h3 { font-size: 1rem; margin-bottom: 8px; }
 .upcoming-questions ul { color: var(--muted); display: grid; gap: 6px; list-style: none; padding: 0; }
@@ -173,6 +193,8 @@ textarea::placeholder { color: #9aa69c; }
   .answer-section { padding-bottom: 76px; }
   .question-card { grid-template-columns: 1fr; gap: 20px; padding: 24px; }
   .question-art { height: 68px; width: 68px; font-size: 2.7rem; }
+  .audio-answer-controls .button { width: 100%; }
+  .audio-answer-player { width: 100%; }
   .my-ideas-section { padding-bottom: 76px; padding-top: 48px; }
   .footer { flex-direction: column; gap: 8px; }
   /* One column at 390px: the emblem keeps its own row above the title rather than

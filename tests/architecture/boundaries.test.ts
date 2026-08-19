@@ -121,6 +121,9 @@ describe("architecture boundaries", () => {
       // client component missing from it is one the rule silently does not cover.
       "src/app/components/admin-access-gate.tsx",
       "src/app/components/admin-inbox-view.tsx",
+      // MCL-30A. Reaches for microphone and object URLs, so it is exactly the kind of
+      // component that would otherwise be tempted to import a server module for them.
+      "src/app/components/audio-answer-recorder.tsx",
     ]) {
       await expectNoForbiddenSource(clientComponent, [
         /from ["']@\/composition\/server["']/,
