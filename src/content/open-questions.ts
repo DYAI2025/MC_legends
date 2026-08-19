@@ -95,3 +95,18 @@ export function otherOpenQuestions(
 ): ReadonlyArray<OpenQuestion> {
   return questions.filter((question) => question.state === "open" && !question.focus);
 }
+
+/**
+ * The still-open questions the project files under the same owner topic as an element.
+ * This is the only way a detail page is allowed to claim that a question belongs to what
+ * a child is reading: both datasets already carry the topic, so the link is a fact the
+ * project wrote down, not a connection invented for the page.
+ */
+export function openQuestionsAbout(
+  internalCategory: InternalCategory,
+  questions: ReadonlyArray<OpenQuestion> = openQuestions,
+): ReadonlyArray<OpenQuestion> {
+  return questions.filter(
+    (question) => question.state === "open" && question.internalCategory === internalCategory,
+  );
+}

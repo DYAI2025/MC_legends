@@ -14,14 +14,38 @@
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 
+const COLUMNS = "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text";
+
 /** Mirrors the adapter's INSERT: same columns, same conflict target, same DO NOTHING. */
 const INSERT = `
   INSERT INTO submission_inbox
-    (submission_id, kind, question_id, created_at, received_at, receipt_id, original_text)
+    (${COLUMNS})
   VALUES ($1, $2, $3, $4, $5, $6, $7)
   ON CONFLICT (submission_id) DO NOTHING
   RETURNING submission_id
 `;
+
+/**
+ * The row that won the conflict, read back inside the same transaction.
+ *
+ * DO NOTHING tells this script that a row with that submission_id exists. It does not
+ * tell it that the row is the one in the file, and the difference is the whole point of
+ * a re-runnable import: "already present" must mean "already present unchanged", or a
+ * cutover can report a clean idempotent re-run over a row whose text, receipt or
+ * instants are not the ones the operator is holding in the file.
+ */
+const SELECT_EXISTING = `SELECT ${COLUMNS} FROM submission_inbox WHERE submission_id = $1`;
+
+/** The immutable fields, in the order the INSERT binds them. */
+const IMMUTABLE_FIELDS = [
+  "submissionId",
+  "kind",
+  "questionId",
+  "createdAt",
+  "receivedAt",
+  "receiptId",
+  "originalText",
+];
 
 /** The InboxRecord fields that must be present and non-empty on every line. */
 const IDENTIFIERS = ["receiptId", "submissionId", "questionId"];
@@ -29,15 +53,47 @@ const IDENTIFIERS = ["receiptId", "submissionId", "questionId"];
 const TIMESTAMPS = ["createdAt", "receivedAt"];
 
 /**
- * A line this importer refuses, carrying the line number it was found on.
+ * A refusal that names one source line, as opposed to a fault in the database or this
+ * script.
  *
  * Named rather than a bare Error so the top level can print it without a stack trace:
  * the operator needs "line 7 is broken and why", not a trace through node's internals.
+ * The headline says which kind of refusal it is, because the two have different fixes -
+ * one edits the file, the other reconciles the file against the row already stored.
  */
-class MalformedLineError extends Error {
-  constructor(lineNumber, reason, options) {
+class ImportRefusal extends Error {
+  constructor(headline, lineNumber, reason, options) {
     super(`line ${lineNumber}: ${reason}`, options);
+    this.name = "ImportRefusal";
+    this.headline = headline;
+  }
+}
+
+/** A line this importer cannot read at all. */
+class MalformedLineError extends ImportRefusal {
+  constructor(lineNumber, reason, options) {
+    super("malformed submissions.jsonl", lineNumber, reason, options);
     this.name = "MalformedLineError";
+  }
+}
+
+/**
+ * A line whose submission_id is already stored under a DIFFERENT immutable record.
+ *
+ * Only the field NAMES are reported. `originalText` is a child's own words and the two
+ * values are exactly what an operator would be tempted to paste into a ticket; the
+ * repository's rule is that child text never reaches a log, and a divergence report is
+ * still a log. Naming the fields and the line is enough to go and look.
+ */
+class ConflictingRecordError extends ImportRefusal {
+  constructor(lineNumber, submissionId, fields) {
+    super(
+      "conflicting record already in submission_inbox",
+      lineNumber,
+      `submission ${submissionId} is already stored with a different ${fields.join(", ")}; ` +
+        "neither the file nor the stored row was changed",
+    );
+    this.name = "ConflictingRecordError";
   }
 }
 
@@ -119,6 +175,80 @@ function toValues(lineNumber, line) {
   ];
 }
 
+/**
+ * One stored timestamptz, spelled the way `instant()` spells the source side.
+ *
+ * pg hands a timestamptz back as a Date only while the session DateStyle is ISO output;
+ * under anything else its parser returns null and a bare `.toISOString()` would throw a
+ * TypeError naming neither the column nor the cause. The session is pinned right after
+ * connect for exactly this reason, and this checks that the pin held rather than
+ * assuming it - the failure it prevents would otherwise look like "every row differs".
+ */
+function storedInstant(column, value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new Error(
+      `submission_inbox.${column} did not come back as a timestamp - check the session DateStyle, which must be 'ISO, YMD'`,
+    );
+  }
+
+  return value.toISOString();
+}
+
+/** The stored row, in the same order and the same spelling as the bound source values. */
+function storedValues(row) {
+  return [
+    row.submission_id,
+    row.kind,
+    row.question_id,
+    storedInstant("created_at", row.created_at),
+    storedInstant("received_at", row.received_at),
+    row.receipt_id,
+    row.original_text,
+  ];
+}
+
+/** Which immutable fields the source line and the stored row disagree on, by name. */
+function differingFields(source, stored) {
+  const differing = [];
+
+  for (let index = 0; index < IMMUTABLE_FIELDS.length; index += 1) {
+    if (source[index] !== stored[index]) {
+      differing.push(IMMUTABLE_FIELDS[index]);
+    }
+  }
+
+  return differing;
+}
+
+/**
+ * Decides what a conflict means, inside the run's transaction.
+ *
+ * Reads only. `ON CONFLICT DO UPDATE` would make the two sides agree by rewriting the
+ * stored row, which is the one thing an importer of immutable submissions must never
+ * do: the row already in the table is what a child was told their answer arrived as.
+ *
+ * The SELECT sees rows this run inserted a moment ago as well as rows from an earlier
+ * run, so two lines in one file sharing a submission_id are compared the same way as a
+ * line against a previous import.
+ */
+async function assertStoredRecordMatches(client, lineNumber, values) {
+  const existing = await client.query(SELECT_EXISTING, [values[0]]);
+  const row = existing.rows[0];
+
+  if (row === undefined) {
+    // Nothing inserted and nothing there. Counting this as "already present" would
+    // report an answer as migrated that no table holds.
+    throw new Error(
+      `line ${lineNumber}: submission ${values[0]} was neither inserted nor found in submission_inbox`,
+    );
+  }
+
+  const differing = differingFields(values, storedValues(row));
+  if (differing.length > 0) {
+    throw new ConflictingRecordError(lineNumber, values[0], differing);
+  }
+}
+
 async function main() {
   const path = process.argv[2];
   if (path === undefined || path.trim().length === 0) {
@@ -150,6 +280,13 @@ async function main() {
   const client = new pg.Client({ connectionString });
   await client.connect();
 
+  // The same two settings PostgresSubmissionInboxStore pins on every pooled connection.
+  // TIME ZONE is cosmetic here; DateStyle is not - under anything but ISO output pg's
+  // timestamptz parser returns null, and the conflict comparison below would then read
+  // every stored instant as unreadable rather than as equal.
+  await client.query("SET TIME ZONE 'UTC'");
+  await client.query("SET DateStyle = 'ISO, YMD'");
+
   let imported = 0;
 
   try {
@@ -169,14 +306,26 @@ async function main() {
           // find which of the lines carried it.
           throw new Error(`line ${lineNumber} was refused by submission_inbox`, { cause });
         }
-        // No row back means the submission_id was already there. That is the idempotent
-        // case, not an error: the row that is already stored is never overwritten, so a
-        // second import can neither duplicate an answer nor rewrite one.
-        if (result.rowCount === 1) imported += 1;
+        if (result.rowCount === 1) {
+          imported += 1;
+          continue;
+        }
+
+        // No row back means the submission_id was already there - but NOT that the row
+        // there is this line. Treating those as the same thing is what let a re-run
+        // report "already present" over a row whose text, receipt or instants had
+        // diverged from the file the operator was importing. The row is read back and
+        // compared; a difference fails the run and rolls back everything this run
+        // inserted, and neither side is rewritten.
+        await assertStoredRecordMatches(client, lineNumber, values);
       }
       await client.query("COMMIT");
     } catch (cause) {
       await client.query("ROLLBACK");
+      // A refusal already names the line and the reason, and the rollback above is what
+      // makes its "nothing was written" true. Wrapping it would bury that behind a
+      // generic message and a stack trace.
+      if (cause instanceof ImportRefusal) throw cause;
       // Attached rather than summarised, like the migration runner does: the driver's
       // error carries the SQLSTATE, the constraint name and the offending value, which
       // is what actually locates a row the table refused.
@@ -197,9 +346,9 @@ try {
   // A malformed line is an operator-fixable fact about the file, so it is reported as
   // one line naming the line number. Anything else keeps its full cause chain, which is
   // where the SQLSTATE and the constraint name live.
-  if (error instanceof MalformedLineError) {
-    console.error(`malformed submissions.jsonl - ${error.message}`);
-    console.error("nothing was imported; fix the line and run the import again");
+  if (error instanceof ImportRefusal) {
+    console.error(`${error.headline} - ${error.message}`);
+    console.error("nothing was imported; resolve it and run the import again");
     process.exit(1);
   }
   throw error;

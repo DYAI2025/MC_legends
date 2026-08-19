@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { deliverSubmission } from "@/application/submissions/deliver-submission";
 import { submitText } from "@/application/submissions/submit-text";
@@ -13,13 +15,17 @@ import {
   type TextSubmission,
 } from "@/domain/submissions/submission";
 import { childFailureMessage, childMessageFor } from "@/app/child-submission-message";
+import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
 import {
+  allIdeasFilter,
   avaloriaIdeas,
   childCategories,
-  type ChildCategory,
+  ideaAnchorId,
+  type CategoryFilter,
 } from "@/content/avaloria-content";
+import { ideaDetailRoute, overviewRoute } from "@/app/world-routes";
 import {
   childStatusFor,
   childStatusLegend,
@@ -42,10 +48,20 @@ export type FamilyExperienceProps = Readonly<{
    * this flag is right or not.
    */
   familySessionActive: boolean;
+  /**
+   * Which topic is shown, decided by the server from the address. MCL-47: not local
+   * state, because a child who opens a tile and comes back - with this page's back link
+   * or with the browser's own - has to find the same topic they left. Two copies of that
+   * answer would be two chances for them to disagree.
+   */
+  selectedCategory: CategoryFilter;
 }>;
 
-export function FamilyExperience({ familySessionActive }: FamilyExperienceProps) {
-  const [selectedCategory, setSelectedCategory] = useState<ChildCategory | "Alle Ideen">("Alle Ideen");
+export function FamilyExperience({
+  familySessionActive,
+  selectedCategory,
+}: FamilyExperienceProps) {
+  const router = useRouter();
   const [answer, setAnswer] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -58,11 +74,53 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
   );
   const visibleIdeas = useMemo(
     () =>
-      selectedCategory === "Alle Ideen"
+      selectedCategory === allIdeasFilter
         ? avaloriaIdeas
         : avaloriaIdeas.filter((idea) => idea.childCategory === selectedCategory),
     [selectedCategory],
   );
+
+  /**
+   * Coming back from a tile, the card that was opened takes focus and comes back on
+   * screen. Explicit rather than left to the browser's fragment handling: which element a
+   * browser focuses for a hash is not the same everywhere, and "the keyboard is where the
+   * child left it" is a promise this page makes, not one it may borrow. Runs once per
+   * mount - arriving at the overview is exactly one mount, whether by back link, back
+   * button or a pasted address.
+   *
+   * The scroll is taken away from `focus()` and made instant on purpose, because focus
+   * alone only guarantees the keyboard, not the eyes. `focus()` scrolls with the page's
+   * own `scroll-behavior`, which is `smooth`, so restoring a card near the bottom of the
+   * grid became half a second of travel - and a moving scroll is cancelled by the next
+   * scroll input. Handing the keyboard back is precisely an invitation to press a key, so
+   * the child cancelled their own way back: measured on the deployed build, one arrow key
+   * left the page at scrollY 40 with the card at 1520 in a 720px viewport, focused and
+   * invisible. Next 16 is where this began - earlier versions forced `scroll-behavior`
+   * to `auto` for the duration of a route transition and no longer do
+   * (node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md, "Scroll
+   * Behavior Override").
+   *
+   * `instant` rather than `auto`: `auto` means "whatever the CSS says", which is the
+   * animation this is getting rid of. `center` rather than `start` so the card arrives
+   * where a child is looking instead of flush against the top edge.
+   */
+  useEffect(() => {
+    const anchor = window.location.hash.slice(1);
+    if (!anchor.startsWith("idee-")) return;
+    const card = document.getElementById(anchor);
+    if (card === null) return;
+    card.focus({ preventScroll: true });
+    card.scrollIntoView({ behavior: "instant", block: "center" });
+  }, []);
+
+  /**
+   * `replace`, not `push`: trying three topics before opening a tile must not put three
+   * entries between the child and the way back. `scroll: false` keeps the grid where they
+   * were reading it instead of jumping to the top of the page.
+   */
+  function chooseCategory(category: CategoryFilter) {
+    router.replace(overviewRoute(category), { scroll: false });
+  }
 
   const refreshSubmissions = useCallback(
     () =>
@@ -209,9 +267,9 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
         </div>
         <div className="category-row" aria-label="Themen auswählen">
           <button
-            className={`category-chip ${selectedCategory === "Alle Ideen" ? "is-selected" : ""}`}
-            aria-pressed={selectedCategory === "Alle Ideen"}
-            onClick={() => setSelectedCategory("Alle Ideen")}
+            className={`category-chip ${selectedCategory === allIdeasFilter ? "is-selected" : ""}`}
+            aria-pressed={selectedCategory === allIdeasFilter}
+            onClick={() => chooseCategory(allIdeasFilter)}
             type="button"
           >
             Alle Ideen
@@ -221,7 +279,7 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
               className={`category-chip ${selectedCategory === category.label ? "is-selected" : ""}`}
               aria-pressed={selectedCategory === category.label}
               key={category.label}
-              onClick={() => setSelectedCategory(category.label)}
+              onClick={() => chooseCategory(category.label)}
               type="button"
             >
               <span aria-hidden="true">{category.icon}</span> {category.label}
@@ -232,17 +290,34 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
           {visibleIdeas.map((idea) => {
             const status = childStatusPresentationFor(childStatusFor(idea.truthStatus));
             return (
-              <article className="idea-card" key={idea.id}>
-                <div className="idea-card-topline">
+              // MCL-47: the whole tile, not a link sitting inside a card. A link gives a
+              // child mouse, touch, keyboard, focus and Enter for free - a div with a
+              // click handler would need role, tabindex and a key handler to imitate
+              // half of that, and would still not be a place the browser can go back to.
+              <Link
+                className="idea-card"
+                href={ideaDetailRoute(idea.id, selectedCategory)}
+                id={ideaAnchorId(idea.id)}
+                key={idea.id}
+              >
+                <span className="idea-card-topline">
                   <span className={`idea-status status-${status.id}`}>
                     <span aria-hidden="true">{status.icon}</span> {status.label}
                   </span>
                   <span className="idea-category">{idea.childCategory}</span>
-                </div>
+                </span>
                 <h3>{idea.title}</h3>
                 <p>{idea.summary}</p>
                 <span className="idea-owner">Thema: {childTopicLabelFor(idea.internalCategory)}</span>
-              </article>
+                {/*
+                  The promise the card makes before it is opened. Always readable rather
+                  than revealed on hover, because a touch screen has no hover at all - the
+                  pointer and keyboard states only make it move, they do not create it.
+                */}
+                <span className="idea-more">
+                  Mehr entdecken <span className="idea-more-arrow" aria-hidden="true">→</span>
+                </span>
+              </Link>
             );
           })}
         </div>
@@ -281,6 +356,17 @@ export function FamilyExperience({ familySessionActive }: FamilyExperienceProps)
             ) : (
               <FamilyAccessGate />
             )}
+            {/*
+              MCL-30A. Behind the same session flag as the answer form: a child without a
+              session sees the question and the world, but is never shown a way to
+              contribute. Absent rather than disabled, for the same reason the textarea
+              is - nothing here invites something this browser may not do.
+
+              A sibling of the form, not a field in it. The recording is not part of the
+              answer that gets sent: there is no server path for audio yet, so putting it
+              inside the form would tie it to a submit button that cannot carry it.
+            */}
+            {familySessionActive ? <AudioAnswerRecorder /> : null}
           </div>
         </div>
 

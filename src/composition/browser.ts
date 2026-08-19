@@ -1,6 +1,7 @@
 import { HttpAdminInboxClient } from "@/adapters/http/http-admin-inbox-client";
 import { HttpFamilySessionClient } from "@/adapters/http/http-family-session-client";
 import { HttpSubmissionInbox } from "@/adapters/http/http-submission-inbox";
+import { AudioCaptureController } from "@/adapters/media/audio-capture-controller";
 import { IndexedDbSubmissionRepository } from "@/adapters/persistence/indexeddb-submission-repository";
 import type { FamilySessionClient } from "@/application/access/family-session-client";
 import type { AdminInboxClient } from "@/application/submissions/admin-inbox-client";
@@ -41,4 +42,16 @@ export function createBrowserAdminSessionClient(): FamilySessionClient {
 /** Reading the protected inbox from the browser. Carries no credential of its own. */
 export function createBrowserAdminInboxClient(): AdminInboxClient {
   return new HttpAdminInboxClient();
+}
+
+/**
+ * MCL-30A: one recording session for one mounted recording area. Deliberately a
+ * factory rather than a shared instance - a microphone is a single resource, and two
+ * components holding one controller would stop each other's recording.
+ *
+ * Reads the browser's own capabilities; on the server it finds none and answers that
+ * it cannot record, which is never drawn and so cannot disagree with the client.
+ */
+export function createBrowserAudioCaptureController(): AudioCaptureController {
+  return new AudioCaptureController();
 }

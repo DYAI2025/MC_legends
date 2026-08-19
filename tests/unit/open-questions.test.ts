@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { allInternalCategories } from "@/content/content-source";
-import { focusQuestion, openQuestions, otherOpenQuestions } from "@/content/open-questions";
+import {
+  focusQuestion,
+  openQuestions,
+  openQuestionsAbout,
+  otherOpenQuestions,
+} from "@/content/open-questions";
 import { expectChildSafe } from "../support/child-safe";
 
 describe("open design questions", () => {
@@ -90,5 +95,46 @@ describe("open design questions", () => {
     expect(others, "the closed question must appear in neither list").not.toContain(previous.id);
     expect(others, "the new focus question must appear in neither list").not.toContain(next.id);
     expect(others).toEqual(rest.map((question) => question.id));
+  });
+});
+
+/**
+ * MCL-47 lets a detail page point at an open question that factually belongs to the
+ * element being read. "Factually" is the whole point: the link exists only where both
+ * datasets already agree on the owner topic, and nothing is conjured up to create one.
+ */
+describe("open questions about an element", () => {
+  it("only returns still-open questions filed under the asked topic", () => {
+    for (const category of allInternalCategories) {
+      for (const question of openQuestionsAbout(category)) {
+        expect(question.internalCategory).toBe(category);
+        expect(question.state).toBe("open");
+      }
+    }
+  });
+
+  it("returns nothing for a topic the question set does not cover", () => {
+    const covered = new Set(openQuestions.map((question) => question.internalCategory));
+    const uncovered = allInternalCategories.filter((category) => !covered.has(category));
+
+    // Without a real uncovered topic this case would assert nothing at all.
+    expect(uncovered.length, "the dataset needs at least one topic with no question").toBeGreaterThan(0);
+    for (const category of uncovered) {
+      expect(openQuestionsAbout(category), `${category} has no question`).toEqual([]);
+    }
+  });
+
+  it("finds the focus question through the topic it belongs to", () => {
+    const focus = focusQuestion();
+    expect(openQuestionsAbout(focus.internalCategory).map((question) => question.id)).toContain(
+      focus.id,
+    );
+  });
+
+  it("skips a closed question", () => {
+    const closed = { ...openQuestions[0], id: "closed-fixture", state: "closed" as const };
+    expect(
+      openQuestionsAbout(closed.internalCategory, [closed]).map((question) => question.id),
+    ).not.toContain("closed-fixture");
   });
 });
