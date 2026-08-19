@@ -77,6 +77,37 @@ class RefusingRecorder extends FakeRecorder {
   }
 }
 
+/**
+ * RES-1. A recorder that is already over by the time start() returns: it hands its
+ * chunks over and calls onstop from inside start() itself. The controller therefore
+ * finishes the whole recording - preview and all - before the line that would announce
+ * "recording" is ever reached.
+ *
+ * Deliberately not a shape the real MediaRecorder produces; it is the smallest fake
+ * that pins the ordering rule, so a later refactor cannot quietly reintroduce an
+ * unconditional publish after start().
+ */
+class SelfCompletingRecorder extends FakeRecorder {
+  override start(): void {
+    this.startCalls += 1;
+    this.state = "recording";
+    super.stop();
+  }
+}
+
+/**
+ * RES-1, the other way a capture can be over inside start(): the recorder fails
+ * instead of finishing. onerror leaves the controller holding no usable capture, and
+ * the failure it published must survive.
+ */
+class SelfFailingRecorder extends FakeRecorder {
+  override start(): void {
+    this.startCalls += 1;
+    this.state = "inactive";
+    this.failWhileRecording();
+  }
+}
+
 type Harness = Readonly<{
   environment: AudioCaptureEnvironment;
   streams: FakeStream[];
@@ -654,5 +685,76 @@ describe("AudioCaptureController", () => {
     const tracks = world.streams[0]?.getTracks() ?? [];
     expect(tracks.length).toBe(2);
     for (const track of tracks) expect(track.stopCalls).toBe(1);
+  });
+
+  /**
+   * RES-1. startRecording() used to publish "recording" unconditionally after start()
+   * returned, overwriting whatever a synchronous callback had already decided. The
+   * child was then shown a stop button for a recording that was already finished, and
+   * stopRecording() could not help them: it returns early once the recorder is gone.
+   *
+   * Measured against d8be4ee, before the ownership guard: phase "recording" with the
+   * finished recording underneath it, and stopRecording() left it at "recording".
+   */
+  it("keeps the finished recording when the recorder ends inside start()", async () => {
+    const world = harness({ recorders: () => new SelfCompletingRecorder() });
+    const controller = new AudioCaptureController(world.environment);
+
+    await controller.startRecording();
+
+    // The result the callback published, not the "recording" that would have followed.
+    expect(controller.snapshot().phase).toBe("recorded");
+    expect(controller.snapshot().failure).toBeNull();
+    expect(controller.snapshot().recording?.source).toBe("microphone");
+
+    // No rescue needed: the child never has to press stop for a capture already over.
+    const before = controller.snapshot();
+    controller.stopRecording();
+    expect(controller.snapshot()).toBe(before);
+
+    const tracks = world.streams[0]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
+    // Exactly one preview for one recording, and it is still the one being shown.
+    expect(world.createdUrls.length).toBe(1);
+    expect(world.revokedUrls).toEqual([]);
+    expect(controller.snapshot().recording?.previewUrl).toBe(world.createdUrls[0]);
+  });
+
+  it("keeps the failure when the recorder fails inside start()", async () => {
+    const world = harness({ recorders: () => new SelfFailingRecorder() });
+    const controller = new AudioCaptureController(world.environment);
+
+    await controller.startRecording();
+
+    expect(controller.snapshot().phase).toBe("error");
+    expect(controller.snapshot().failure).toBe("recording-failed");
+    expect(controller.snapshot().recording).toBeNull();
+
+    const before = controller.snapshot();
+    controller.stopRecording();
+    expect(controller.snapshot()).toBe(before);
+
+    const tracks = world.streams[0]?.getTracks() ?? [];
+    expect(tracks.length).toBe(2);
+    for (const track of tracks) expect(track.stopCalls).toBe(1);
+    expect(world.createdUrls).toEqual([]);
+  });
+
+  /**
+   * The guard above must not cost the ordinary path its announcement: a recorder that
+   * behaves like the real one is still running when start() returns, and the child is
+   * still told so.
+   */
+  it("still announces a recording that is genuinely running after start()", async () => {
+    const world = harness();
+    const controller = new AudioCaptureController(world.environment);
+
+    await controller.startRecording();
+    expect(controller.snapshot().phase).toBe("recording");
+
+    world.recorders[0]?.stop();
+    expect(controller.snapshot().phase).toBe("recorded");
+    expect(controller.snapshot().recording?.source).toBe("microphone");
   });
 });

@@ -241,6 +241,10 @@ export class AudioCaptureController {
     this.#stream = stream;
     this.#chunks = [];
 
+    // Whether this capture is still the controller's when start() hands control back.
+    // A recorder that ends or fails from inside its own start() has already published
+    // the state the child should see, and "recording" must not be written over it.
+    let stillOurs = false;
     try {
       const recorder = createRecorder(stream);
       recorder.ondataavailable = (event) => {
@@ -252,13 +256,26 @@ export class AudioCaptureController {
         this.#fail("recording-failed");
       };
       this.#recorder = recorder;
+
+      // Read before start() so the comparison after it is against the state this call
+      // itself put up, not against whatever a callback replaced it with.
+      const announced = this.#state;
       recorder.start();
+      stillOurs =
+        // Nothing released or cancelled the capture out from under this call,
+        this.#generation === generation &&
+        // it is still this recorder the controller holds - #finish() drops it,
+        this.#recorder === recorder &&
+        // and no callback published in the meantime. The last check is the load-bearing
+        // one: a failing recorder publishes without ever letting go of #recorder.
+        this.#state === announced;
     } catch {
       this.#releaseMicrophone();
       this.#fail("recording-failed");
       return;
     }
 
+    if (!stillOurs) return;
     this.#publish({ phase: "recording", recording: this.#state.recording, failure: null });
   };
 
