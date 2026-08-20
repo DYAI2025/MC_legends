@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // MCL-63. The deployment contract, committed. Before this file existed the Cloudflare
+  // dashboard ran `npx wrangler deploy`, which triggered an automatic Next.js migration
+  // and installed wrangler and @opennextjs/cloudflare unpinned inside every deployment
+  // build. Both are devDependencies now, and the build is `npm run build:cloudflare`.
+
+  // NOT `.open-next/worker.js`. cloudflare/worker.ts wraps that generated handler so
+  // /api/* is forwarded to the VPS before Next sees it - see cloudflare/api-proxy.ts.
+  "main": "cloudflare/worker.ts",
+  "name": "mc-legends",
+
+  // >= 2024-09-23 is what @opennextjs/cloudflare requires; this is the day the branch
+  // was cut. nodejs_compat is required by the OpenNext runtime.
+  // global_fetch_strictly_public makes a fetch to this worker's own hostname go out to
+  // the public internet instead of looping back, which is what the /api/* forward needs
+  // to keep meaning "the VPS" even if the origin is ever pointed at a proxied name.
+  "compatibility_date": "2026-08-20",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  // A public hostname, not a secret: it is the same URL a browser would use. No
+  // AVALORIA_* value and no database credential belongs in this file or in any other
+  // committed file - the family and admin codes stay on the VPS, where the API lives.
+  "vars": {
+    "MCL_API_ORIGIN": "https://srv1308064.hstgr.cloud:8443"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

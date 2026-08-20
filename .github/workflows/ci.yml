@@ -114,3 +114,51 @@ jobs:
 
       - name: Dependency audit
         run: npm audit --audit-level=high
+
+  # MCL-63. The real OpenNext/Cloudflare worker build, from the repository's own
+  # configuration. A separate job so the verify job above stays byte-identical and keeps
+  # its PostgreSQL service, which this one does not need.
+  #
+  # This is the gate for the failure that shipped: `wrangler deploy` used to migrate the
+  # project during the deployment build and the worker bundle then failed with
+  # `Could not resolve "pg-cloudflare"`. Nothing here is mocked - esbuild really bundles
+  # the worker, so that failure fails this job on its own exit code. The bundle check
+  # afterwards is for the quieter regression: a build that passes because somebody put a
+  # working PostgreSQL client back into the Worker.
+  #
+  # No Cloudflare credentials, and no deploy: this validates the build only.
+  cloudflare-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Pin npm
+        run: npm install --global npm@11.17.0
+
+      - name: Install dependencies
+        run: npm ci --no-fund
+
+      # Same canary values as the Build step in the verify job, so the secret scan in
+      # the next step is looking for something that was actually present while the
+      # bundle was produced.
+      - name: OpenNext Cloudflare build
+        run: npm run build:cloudflare
+        env:
+          AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
+          AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
+          AVALORIA_ADMIN_ACCESS_CODE: ci-canary-admin-code-7a2d5f14
+
+      - name: Worker bundle assertions
+        run: npm run check:cloudflare-bundle
+        env:
+          AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
+          AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
+          AVALORIA_ADMIN_ACCESS_CODE: ci-canary-admin-code-7a2d5f14

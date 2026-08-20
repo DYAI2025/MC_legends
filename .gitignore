@@ -5,6 +5,10 @@
 /.next/
 /out/
 
+# cloudflare / opennext build output (MCL-63)
+/.open-next/
+/.wrangler/
+
 # testing
 /coverage/
 /playwright-report/

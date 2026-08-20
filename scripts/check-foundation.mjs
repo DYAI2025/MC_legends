@@ -50,6 +50,17 @@ const required = [
   "scripts/check-secrets.mjs",
   "scripts/check-client-secrets.mjs",
   "scripts/check-integration-tests-ran.mjs",
+  // MCL-63. The Cloudflare deployment contract. Before these files existed the
+  // dashboard ran `npx wrangler deploy`, which migrated the project and installed the
+  // toolchain unpinned inside every deployment build. Losing any one of them puts that
+  // back, silently.
+  "wrangler.jsonc",
+  "open-next.config.ts",
+  "cloudflare/worker.ts",
+  "cloudflare/api-proxy.ts",
+  "cloudflare/persistence-unavailable.ts",
+  "cloudflare/pg-unavailable.ts",
+  "scripts/check-cloudflare-bundle.mjs",
   "docs/deploy/vps-mc-legends.md",
   "docs/ops/MCL-48-backup-restore.md",
   "docs/security/MCL-34-family-access.md",
