@@ -1,0 +1,36 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# testing
+/coverage/
+/playwright-report/
+/test-results/
+
+# environment
+.env
+.env.*
+!.env.example
+
+# local tooling
+.DS_Store
+*.log
+npm-debug.log*
+*.tsbuildinfo
+.claude/settings.local.json
+
+# editors
+.idea/
+.vscode/
+
+# generated evidence
+artifacts/
+
+# local generator validation logs
+/.validation/
+
+# local family project inbox (AVALORIA_INBOX_DIR default)
+/.data/
