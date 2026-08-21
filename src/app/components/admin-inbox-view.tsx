@@ -9,11 +9,20 @@ import {
   QUESTION_FILTER_DEBOUNCE_MS,
   type AdminFilterState,
 } from "@/app/admin-inbox-query";
+import type { SubmissionKind } from "@/domain/submissions/submission";
 import type { AdminInboxResult } from "@/application/submissions/admin-inbox-client";
 import type { InboxEntry, InboxPage } from "@/application/submissions/submission-inbox-reader";
 import { createBrowserAdminInboxClient } from "@/composition/browser";
 
 const inboxClient = createBrowserAdminInboxClient();
+
+/**
+ * The kinds the filter can express, as a total list over the union.
+ *
+ * `satisfies` rather than a literal array of strings: a third submission kind is then a
+ * compile error here instead of a value the server accepts and this control cannot select.
+ */
+const KIND_OPTIONS = ["text", "audio"] as const satisfies readonly SubmissionKind[];
 
 /**
  * What an adult reads when a read fails. A total table over the non-granted outcomes,
@@ -210,7 +219,11 @@ export function AdminInboxView() {
             }
           >
             <option value="">Alle</option>
-            <option value="text">text</option>
+            {KIND_OPTIONS.map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -280,15 +293,63 @@ function AdminInboxCard({ entry }: { entry: InboxEntry }) {
   return (
     <li className="admin-entry">
       {/*
-        The child's words, alone in their own labelled region and rendered as text.
-        `white-space: pre-wrap` in the stylesheet keeps the leading, trailing and
-        repeated spaces the store preserved byte for byte - collapsing them here would
-        display something the child did not write.
+        The child's own answer, alone in its own labelled region.
+
+        Branched on `kind` rather than reading one field that might hold either. A spoken
+        answer's original is the recording, and MCL-49 keeps the bytes out of this payload
+        entirely - so the audio branch shows what was recorded about it and reaches the
+        recording itself through the separate authorized route, never through a URL carried
+        in the listing.
       */}
-      <section className="admin-original" aria-label="Originaltext">
-        <h3>Originaltext</h3>
-        <p className="admin-original-text">{entry.originalText}</p>
-      </section>
+      {entry.kind === "text" ? (
+        <section className="admin-original" aria-label="Originaltext">
+          <h3>Originaltext</h3>
+          {/*
+            Rendered as text. `white-space: pre-wrap` in the stylesheet keeps the leading,
+            trailing and repeated spaces the store preserved byte for byte - collapsing
+            them here would display something the child did not write.
+          */}
+          <p className="admin-original-text">{entry.originalText}</p>
+        </section>
+      ) : (
+        <section className="admin-original" aria-label="Originalaufnahme">
+          <h3>Originalaufnahme</h3>
+          {/*
+            The recording itself, above its metadata and inside the ORIGINAL region: a
+            spoken answer's original is the audio, and the numbers below it are what the
+            system recorded about it.
+
+            `src` is a route path and never an object key. The listing carries no URL and
+            no filesystem path - this is built from the submission id, and the route looks
+            the key up behind the admin gate - so there is no value on this screen that
+            could become a public media link if the page leaked.
+
+            `preload="none"` because opening the inbox must not fetch every recording it
+            lists: at 8 MiB each that is the difference between a page load and a download.
+          */}
+          <audio
+            className="admin-original-player"
+            controls
+            preload="none"
+            src={`/api/admin/inbox/submissions/${encodeURIComponent(entry.submissionId)}/audio`}
+          >
+            Dieser Browser kann die Aufnahme nicht abspielen.
+          </audio>
+          <dl className="admin-original-audio">
+            <dt>Format</dt>
+            <dd>{entry.audio.mimeType}</dd>
+            <dt>Groesse</dt>
+            <dd>{entry.audio.sizeBytes} Bytes</dd>
+            {/*
+              The hash, so an adult can check a stored file against what the database says
+              it should be. The object key is deliberately NOT shown: it is a filesystem
+              path, and a path on screen is a path in a screenshot.
+            */}
+            <dt>SHA-256</dt>
+            <dd className="admin-original-hash">{entry.audio.sha256}</dd>
+          </dl>
+        </section>
+      )}
 
       {/* Everything the system recorded about that text - never the text itself. */}
       <section className="admin-derived" aria-label="Systemangaben">

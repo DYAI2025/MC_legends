@@ -1,4 +1,6 @@
 import { Pool } from "pg";
+import { isAudioMimeType, type AudioArtifact } from "@/domain/media/audio-artifact";
+import type { SubmissionKind } from "@/domain/submissions/submission";
 import type { PoolClient, PoolConfig, QueryResult, QueryResultRow } from "pg";
 import {
   SubmissionPayloadError,
@@ -15,7 +17,19 @@ import {
   type SubmissionInboxReader,
 } from "@/application/submissions/submission-inbox-reader";
 
-/** The columns this adapter writes and reads back. Defaults own status and inserted_at. */
+/**
+ * The columns this adapter writes and reads back. Defaults own status and inserted_at.
+ *
+ * Every media column is nullable here because it is nullable in the schema, and the
+ * schema makes it so per row rather than per column: `submission_inbox_kind_shape` in
+ * migration 0002 requires all five to be present for a row whose kind is 'audio' and all
+ * five to be absent for one whose kind is 'text'. This type is the raw row, so it cannot
+ * express that - `toRecord` is where the row becomes one member of the union or throws.
+ *
+ * `media_size_bytes` arrives as a string, not a number. It is a bigint column, and
+ * node-postgres returns bigint as text on purpose: the range exceeds what a JS number can
+ * hold exactly, so the driver refuses to lose precision silently. Parsed in toRecord.
+ */
 type InboxRow = {
   submission_id: string;
   kind: string;
@@ -23,14 +37,20 @@ type InboxRow = {
   created_at: Date;
   received_at: Date;
   receipt_id: string;
-  original_text: string;
+  original_text: string | null;
+  media_object_key: string | null;
+  media_mime_type: string | null;
+  media_extension: string | null;
+  media_size_bytes: string | null;
+  media_sha256: string | null;
 };
 
 /** The same row plus the column only the read side selects. */
 type InboxEntryRow = InboxRow & { status: string };
 
 const COLUMNS =
-  "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text";
+  "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text, " +
+  "media_object_key, media_mime_type, media_extension, media_size_bytes, media_sha256";
 
 /**
  * The insert is a single statement so the conflict is resolved by the primary key and
@@ -41,7 +61,7 @@ const COLUMNS =
  */
 const INSERT = `
   INSERT INTO submission_inbox (${COLUMNS})
-  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
   ON CONFLICT (submission_id) DO NOTHING
   RETURNING submission_id
 `;
@@ -53,6 +73,9 @@ const SELECT = `SELECT ${COLUMNS} FROM submission_inbox WHERE submission_id = $1
  * no writer supplies and the schema defaults.
  */
 const ENTRY_COLUMNS = `${COLUMNS}, status`;
+
+/** The read side's single-entry lookup (MCL-49), by the primary key. */
+const SELECT_ENTRY = `SELECT ${ENTRY_COLUMNS} FROM submission_inbox WHERE submission_id = $1`;
 
 /**
  * Newest-first, with submission_id as the tiebreaker.
@@ -260,24 +283,120 @@ function isoFrom(row: InboxRow, column: "created_at" | "received_at"): string {
  * widening the constraint and this function fails loudly on the row it cannot type,
  * rather than handing the caller a record whose declared kind is a lie.
  */
-function kindFrom(value: string): InboxRecord["kind"] {
-  if (value === "text") {
+function kindFrom(value: string): SubmissionKind {
+  if (value === "text" || value === "audio") {
     return value;
   }
 
   throw new Error(`submission_inbox.kind holds a value this adapter cannot type: ${value}`);
 }
 
-function toRecord(row: InboxRow): InboxRecord {
+/**
+ * The five media columns, checked together rather than one at a time.
+ *
+ * `submission_inbox_kind_shape` guarantees they are all present on an audio row, so a
+ * missing one here means the constraint was dropped, the row was written by something
+ * that bypassed it, or this adapter is reading a schema older than itself. Each of those
+ * is worth a loud failure naming the column - the alternative is an AudioArtifact with an
+ * `undefined` objectKey travelling on to a route that will try to open it.
+ *
+ * The size is re-validated after parsing, not trusted: it arrives as text from a bigint
+ * column, and `Number()` on a value beyond 2^53 returns a rounded number rather than
+ * failing. A rounded byte count would silently disagree with the file on disk.
+ */
+function audioFrom(row: InboxRow): AudioArtifact {
+  const missing = (
+    [
+      "media_object_key",
+      "media_mime_type",
+      "media_extension",
+      "media_size_bytes",
+      "media_sha256",
+    ] as const
+  ).filter((column) => row[column] === null);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `submission_inbox row ${row.submission_id} is kind='audio' but holds no ${missing.join(", ")}`,
+    );
+  }
+
+  const mimeType = row.media_mime_type as string;
+  if (!isAudioMimeType(mimeType)) {
+    throw new Error(
+      `submission_inbox.media_mime_type holds a type this adapter cannot serve: ${mimeType}`,
+    );
+  }
+
+  const sizeBytes = Number(row.media_size_bytes);
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
+    throw new Error(
+      `submission_inbox row ${row.submission_id} holds a media_size_bytes this adapter cannot represent exactly`,
+    );
+  }
+
   return {
-    kind: kindFrom(row.kind),
+    objectKey: row.media_object_key as string,
+    mimeType,
+    extension: row.media_extension as string,
+    sizeBytes,
+    sha256: row.media_sha256 as string,
+  };
+}
+
+/**
+ * Whether a re-delivery carries a different original from the one already stored.
+ *
+ * A changed kind counts, and it is the case worth naming: the same submissionId arriving
+ * once as text and once as audio means something upstream is reusing an id across two
+ * different answers, which no retry ever does.
+ *
+ * For audio the SHA-256 is the comparison. It IS the identity of the bytes, so comparing
+ * it is comparing the recordings without either of them being in memory here.
+ */
+function divergesFrom(stored: InboxRecord, redelivered: InboxRecord): boolean {
+  if (stored.kind !== redelivered.kind) {
+    return true;
+  }
+
+  if (stored.kind === "text" && redelivered.kind === "text") {
+    return stored.originalText !== redelivered.originalText;
+  }
+
+  if (stored.kind === "audio" && redelivered.kind === "audio") {
+    return stored.audio.sha256 !== redelivered.audio.sha256;
+  }
+
+  return false;
+}
+
+/**
+ * One row as one member of the union. A `switch` with no `default`, so a third kind is a
+ * compile error rather than a record silently missing its payload.
+ */
+function toRecord(row: InboxRow): InboxRecord {
+  const base = {
     receiptId: row.receipt_id,
     receivedAt: isoFrom(row, "received_at"),
     submissionId: row.submission_id,
     questionId: row.question_id,
     createdAt: isoFrom(row, "created_at"),
-    originalText: row.original_text,
   };
+
+  switch (kindFrom(row.kind)) {
+    case "text":
+      if (row.original_text === null) {
+        // submission_inbox_kind_shape forbids this. Reaching it means the constraint is
+        // gone or the row predates it, and `originalText: null` would render as an empty
+        // answer in the admin view - a child's words replaced by nothing, silently.
+        throw new Error(
+          `submission_inbox row ${row.submission_id} is kind='text' but holds no original_text`,
+        );
+      }
+      return { ...base, kind: "text", originalText: row.original_text };
+    case "audio":
+      return { ...base, kind: "audio", audio: audioFrom(row) };
+  }
 }
 
 /**
@@ -399,8 +518,42 @@ export class PostgresSubmissionInboxStore
     };
   }
 
+  /**
+   * One entry by submission id (MCL-49), which is the primary key - so this is an index
+   * lookup and not a filtered scan, and it can return at most one row by construction.
+   *
+   * Mapped through the same `toEntry` the list side uses, so the entry the playback route
+   * acts on is the same shape the admin list showed. A second mapping here is how the two
+   * would eventually disagree about what a stored recording is.
+   */
+  async find(submissionId: string): Promise<InboxEntry | null> {
+    const pool = poolFor(this.connectionString);
+
+    const found = await run<InboxEntryRow>(pool, SELECT_ENTRY, [submissionId]);
+    const row = found.rows[0];
+
+    return row === undefined ? null : toEntry(row);
+  }
+
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {
     const pool = poolFor(this.connectionString);
+
+    // The five media columns and original_text are mutually exclusive per row, which is
+    // what `submission_inbox_kind_shape` enforces. Built here as one object so the two
+    // kinds cannot drift into two different INSERT statements with two different column
+    // lists - the version of this that eventually forgets to bind one column.
+    const media =
+      record.kind === "audio"
+        ? {
+            objectKey: record.audio.objectKey,
+            mimeType: record.audio.mimeType,
+            extension: record.audio.extension,
+            // Bound as a string: the column is bigint, and node-postgres round-trips
+            // bigint as text so nothing is rounded on the way in either.
+            sizeBytes: String(record.audio.sizeBytes),
+            sha256: record.audio.sha256,
+          }
+        : { objectKey: null, mimeType: null, extension: null, sizeBytes: null, sha256: null };
 
     const inserted = await run(pool, INSERT, [
       record.submissionId,
@@ -409,7 +562,12 @@ export class PostgresSubmissionInboxStore
       instant(record.createdAt),
       instant(record.receivedAt),
       record.receiptId,
-      record.originalText,
+      record.kind === "text" ? record.originalText : null,
+      media.objectKey,
+      media.mimeType,
+      media.extension,
+      media.sizeBytes,
+      media.sha256,
     ]);
 
     if (inserted.rowCount === 1) {
@@ -435,13 +593,14 @@ export class PostgresSubmissionInboxStore
 
     const kept = toRecord(row);
 
-    if (kept.originalText !== record.originalText) {
+    if (divergesFrom(kept, record)) {
       // Correct per the port's contract - the stored original is never rewritten by a
       // later delivery - but silent until now, which would leave MCL-50's admin view
-      // showing an answer nobody can explain. The submissionId only: the two texts are
-      // a child's own words and do not belong in a log.
+      // showing an answer nobody can explain. The submissionId and the two kinds only:
+      // the texts are a child's own words, and the hash identifies the recording, so
+      // neither belongs in a log.
       console.warn(
-        `submission ${record.submissionId} was re-delivered with different originalText; the stored text is kept`,
+        `submission ${record.submissionId} was re-delivered with a different original (stored kind=${kept.kind}, redelivered kind=${record.kind}); the stored original is kept`,
       );
     }
 

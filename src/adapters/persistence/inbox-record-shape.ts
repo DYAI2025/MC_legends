@@ -1,3 +1,8 @@
+import {
+  isAudioMimeType,
+  isSha256Hex,
+  type AudioArtifact,
+} from "@/domain/media/audio-artifact";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
 
 /**
@@ -12,6 +17,14 @@ import type { InboxRecord } from "@/application/submissions/submission-inbox-sto
  * So this returns a record it has actually checked, field by field, or the reason keys
  * that disqualified the value. The reasons are field names on purpose: they are safe to
  * log, and the line's content - which can hold a child's own words - is not.
+ *
+ * It reads both kinds since MCL-49, and it has to. Measured on e3db9c3, when it did not:
+ * the upload route wrote an audio line to the JSONL file and this function refused it for
+ * its `kind`, so the adapter skipped it on every read. Silently - the duplicate check
+ * could not see the line, so a retry appended a second line with a second receipt for one
+ * submission, and the admin list showed neither. The file adapter is MCL-48's rollback
+ * path, so the moment that costs somebody data is the moment they are already dealing
+ * with a problem.
  *
  * Deliberately NOT shared with `scripts/import-inbox-jsonl.mjs`. That script is plain
  * `.mjs` run by `node` with no build step, so it cannot import this module at all, and
@@ -89,10 +102,12 @@ export function readInboxRecord(value: unknown): InboxRecordCheck {
   const source = value as Record<string, unknown>;
   const defects: string[] = [];
 
-  // Checked, not narrowed by assertion: MCL-30 widens this union, and the day it does
-  // an old line and a new one must stay distinguishable rather than both reading as
-  // whatever the type currently says.
-  if (source.kind !== "text") {
+  // Checked, not narrowed by assertion. The union has two members since MCL-49, and a
+  // line has to say which one it is: without the discriminant the text lines written
+  // before MCL-49 and the audio lines written after would be indistinguishable, which is
+  // exactly the ambiguity the field was reserved to prevent.
+  const kind = source.kind;
+  if (kind !== "text" && kind !== "audio") {
     defects.push("kind");
   }
 
@@ -109,24 +124,88 @@ export function readInboxRecord(value: unknown): InboxRecordCheck {
     }
   }
 
-  if (typeof source.originalText !== "string" || !isRepresentable(source.originalText)) {
+  if (kind === "text" && (typeof source.originalText !== "string" || !isRepresentable(source.originalText))) {
     defects.push("originalText");
+  }
+
+  const audio = kind === "audio" ? readAudioArtifact(source.audio) : null;
+  if (kind === "audio" && audio === null) {
+    defects.push("audio");
   }
 
   if (defects.length > 0) {
     return { ok: false, defects };
   }
 
-  return {
-    ok: true,
-    record: {
-      kind: "text",
-      receiptId: source.receiptId as string,
-      receivedAt: source.receivedAt as string,
-      submissionId: source.submissionId as string,
-      questionId: source.questionId as string,
-      createdAt: source.createdAt as string,
-      originalText: source.originalText as string,
-    },
+  const base = {
+    receiptId: source.receiptId as string,
+    receivedAt: source.receivedAt as string,
+    submissionId: source.submissionId as string,
+    questionId: source.questionId as string,
+    createdAt: source.createdAt as string,
   };
+
+  // Built member by member rather than spread out of `source`, so a field added to
+  // InboxRecord fails to compile here until this function is taught to read it - instead
+  // of arriving as `undefined` behind a cast. The `if` is what narrows `kind`; a switch
+  // over a `string` would not.
+  if (kind === "text") {
+    return {
+      ok: true,
+      record: { ...base, kind: "text", originalText: source.originalText as string },
+    };
+  }
+
+  return { ok: true, record: { ...base, kind: "audio", audio: audio as AudioArtifact } };
+}
+
+/**
+ * The five media fields, checked together, or null.
+ *
+ * Constructed rather than cast, for the same reason the record above is: a field added to
+ * AudioArtifact is a compile error here rather than an `undefined` travelling on to a
+ * route that will try to open it.
+ *
+ * What is checked is the SHAPE - the mime type is on the allowlist, the digest looks like
+ * a digest, the size is a byte count that can be represented exactly. What is deliberately
+ * NOT checked is that the object key is the one the domain would derive from that digest
+ * and that mime type. Mirroring the derivation here would make this reader reject lines it
+ * wrote itself the day the extension table changes, which is the same argument that keeps
+ * the schema's length caps out of this module. The last guard on the path is the blob
+ * store's own key pattern, which refuses anything it did not mint - by construction, and
+ * at the point where a string is about to become a filesystem path.
+ */
+function readAudioArtifact(value: unknown): AudioArtifact | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+
+  const objectKey = source.objectKey;
+  const mimeType = source.mimeType;
+  const extension = source.extension;
+  const sizeBytes = source.sizeBytes;
+  const sha256 = source.sha256;
+
+  if (!isReadableIdentifier(objectKey) || !isReadableIdentifier(extension)) {
+    return null;
+  }
+
+  if (typeof mimeType !== "string" || !isAudioMimeType(mimeType)) {
+    return null;
+  }
+
+  // A positive safe integer. `Number.isSafeInteger` is what keeps a size beyond 2^53 -
+  // which a bigint column can hold and a JS number cannot represent exactly - from
+  // becoming a rounded byte count that silently disagrees with the file on disk.
+  if (typeof sizeBytes !== "number" || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
+    return null;
+  }
+
+  if (typeof sha256 !== "string" || !isSha256Hex(sha256)) {
+    return null;
+  }
+
+  return { objectKey, mimeType, extension, sizeBytes, sha256 };
 }

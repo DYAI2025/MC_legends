@@ -1,7 +1,7 @@
 /**
  * Proves that the PostgreSQL integration suites actually EXECUTED.
  *
- * The three suites under `tests/integration/` are gated on MCL_TEST_DATABASE_URL with
+ * The suites under `tests/integration/` are gated on MCL_TEST_DATABASE_URL with
  * `describe.skipIf(...)`, so without that variable vitest reports them as pending and
  * still exits 0. A green `npm run test` is therefore indistinguishable from a run in
  * which the adapter was never touched - which is exactly how these suites came to have

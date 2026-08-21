@@ -59,6 +59,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # eslint does not read shell. Both scripts under scripts/ are load-bearing for
+      # recovery - one takes the backup, the other is what decides a backup is good - and
+      # neither is exercised by `npm run test` beyond the verifier's own cases.
+      # shellcheck is preinstalled on ubuntu-latest; --version first so a runner image
+      # that ever drops it fails legibly instead of looking like a defect in the scripts.
+      - name: Shell lint
+        run: shellcheck --version && shellcheck scripts/*.sh
+
       - name: Typecheck
         run: npm run typecheck
 

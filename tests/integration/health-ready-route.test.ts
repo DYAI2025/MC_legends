@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The `database: "ok"` branch is the one branch a fake cannot prove. A mocked client
@@ -13,7 +16,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const CONNECTION_STRING = process.env.MCL_TEST_DATABASE_URL?.trim() ?? "";
 const ENABLED = CONNECTION_STRING.length > 0;
 
-afterEach(() => {
+let mediaDirectory = "";
+
+beforeEach(async () => {
+  // Its own directory, so this case never writes a probe file into the repository's
+  // .data/media - and so `storage: "ok"` here means a real write really succeeded.
+  mediaDirectory = await mkdtemp(join(tmpdir(), "mcl-ready-int-"));
+  vi.stubEnv("AVALORIA_MEDIA_DIR", mediaDirectory);
+});
+
+afterEach(async () => {
+  await rm(mediaDirectory, { recursive: true, force: true });
   vi.resetModules();
   vi.unstubAllEnvs();
 });
@@ -26,6 +39,12 @@ describe.skipIf(!ENABLED)("GET /api/health/ready against a real PostgreSQL", () 
     const response = await GET();
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ app: "ok", database: "ok" });
+    // All three reported apart. This is the shape the deploy runbook tells an operator to
+    // expect from a healthy VPS, so the assertion is the whole body rather than one field.
+    await expect(response.json()).resolves.toEqual({
+      app: "ok",
+      database: "ok",
+      storage: "ok",
+    });
   });
 });

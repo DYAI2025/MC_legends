@@ -1,3 +1,4 @@
+import type { SubmissionKind } from "@/domain/submissions/submission";
 import type {
   InboxEntryStatus,
   InboxQuery,
@@ -10,7 +11,11 @@ import type {
  */
 export type AdminFilterState = Readonly<{
   status: "" | InboxEntryStatus;
-  kind: "" | "text";
+  /**
+   * `SubmissionKind` rather than a hand-written list, so a new kind is a compile error in
+   * the view's option table rather than a filter the controls silently cannot express.
+   */
+  kind: "" | SubmissionKind;
   questionId: string;
 }>;
 
@@ -75,7 +80,7 @@ export function createLatestOnly(): {
 export function buildInboxQuery(filters: AdminFilterState): InboxQuery {
   const query: {
     status?: InboxEntryStatus;
-    kind?: "text";
+    kind?: SubmissionKind;
     questionId?: string;
   } = {};
 

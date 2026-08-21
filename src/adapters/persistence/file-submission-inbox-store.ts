@@ -1,10 +1,12 @@
 import { mkdir, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readInboxRecord } from "./inbox-record-shape";
-import type {
-  AppendOutcome,
-  InboxRecord,
-  SubmissionInboxStore,
+import { MAX_AUDIO_BYTES } from "@/domain/media/audio-artifact";
+import {
+  SubmissionPayloadError,
+  type AppendOutcome,
+  type InboxRecord,
+  type SubmissionInboxStore,
 } from "@/application/submissions/submission-inbox-store";
 import {
   MAX_INBOX_PAGE_SIZE,
@@ -70,17 +72,26 @@ function matches(record: InboxRecord, query: InboxQuery): boolean {
   return query.status === undefined || query.status === "RECEIVED";
 }
 
+/**
+ * A `switch` with no `default`, so a third submission kind is a compile error here rather
+ * than an entry silently missing whichever payload the new kind carries.
+ */
 function toEntry(record: InboxRecord): InboxEntry {
-  return {
+  const base = {
     submissionId: record.submissionId,
-    kind: record.kind,
     questionId: record.questionId,
     createdAt: record.createdAt,
     receivedAt: record.receivedAt,
     receiptId: record.receiptId,
-    originalText: record.originalText,
-    status: "RECEIVED",
+    status: "RECEIVED" as const,
   };
+
+  switch (record.kind) {
+    case "text":
+      return { ...base, kind: "text", originalText: record.originalText };
+    case "audio":
+      return { ...base, kind: "audio", audio: record.audio };
+  }
 }
 
 /**
@@ -101,6 +112,25 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
   constructor(private readonly directory: string) {}
 
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {
+    // This adapter's answer to `submission_inbox_media_size_bounded` (MCL-49 finding F1).
+    //
+    // A JSONL file carries no CHECK constraint, and MCL-48 makes this the store the app
+    // falls back to when DATABASE_URL is removed. Measured on a135e2b, that asymmetry was
+    // load-bearing in the wrong direction: the same oversized recording PostgreSQL refuses
+    // with a 23514 was written here and answered with a receipt, so a rollback quietly
+    // relaxed a product limit at the moment somebody was already dealing with a problem.
+    //
+    // Before the duplicate scan and before mkdir on purpose: a record the store will never
+    // accept must not cost a full read of the file first.
+    //
+    // SubmissionPayloadError rather than a bare Error, because the port draws exactly this
+    // line and the route reads it: a payload no retry can fix ends as a 400, and everything
+    // else is a 503 the caller is invited to try again. It is the same error the PostgreSQL
+    // adapter raises for the same record, which is what the shared store contract pins.
+    if (record.kind === "audio" && record.audio.sizeBytes > MAX_AUDIO_BYTES) {
+      throw new SubmissionPayloadError("audio size exceeds the product maximum");
+    }
+
     return serialize(this.directory, async () => {
       const existing = await this.findBySubmissionId(record.submissionId);
       if (existing !== null) {
@@ -281,5 +311,19 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
       // inbox look smaller than it is.
       total: matching.length,
     };
+  }
+
+  /**
+   * One entry by submission id (MCL-49), over the same scan the duplicate check uses.
+   *
+   * Deliberately `findBySubmissionId` rather than a second scan of its own: the write
+   * side's idea of "the store already holds this submission" and the read side's idea of
+   * "this submission exists" have to be the same idea, including which damaged lines they
+   * both skip. Two scans over one format would eventually disagree, and the disagreement
+   * would look like a submission that blocks a retry and cannot be played back.
+   */
+  async find(submissionId: string): Promise<InboxEntry | null> {
+    const record = await this.findBySubmissionId(submissionId);
+    return record === null ? null : toEntry(record);
   }
 }

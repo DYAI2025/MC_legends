@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import type {
+  AudioInboxRecord,
+  TextInboxRecord,
+} from "@/application/submissions/submission-inbox-store";
 import {
   lockSubmissionInboxTable,
   unlockSubmissionInboxTable,
@@ -45,7 +48,7 @@ async function emptyTable(): Promise<void> {
   await inspect().query("TRUNCATE submission_inbox");
 }
 
-function sourceRecord(overrides: Partial<InboxRecord> = {}): InboxRecord {
+function sourceRecord(overrides: Partial<TextInboxRecord> = {}): TextInboxRecord {
   return {
     kind: "text",
     submissionId: "sub-import-1",
@@ -54,6 +57,31 @@ function sourceRecord(overrides: Partial<InboxRecord> = {}): InboxRecord {
     receivedAt: "2026-08-13T09:00:01.000Z",
     receiptId: "receipt-import-1",
     originalText: "  ein drache mit  zwei koepfen  ",
+    ...overrides,
+  };
+}
+
+/**
+ * One spoken answer as the file adapter writes it (MCL-49).
+ *
+ * Every value satisfies migration 0002's CHECK constraints, so a failure in these cases
+ * is the importer's and not the fixture's.
+ */
+function sourceRecording(overrides: Partial<AudioInboxRecord> = {}): AudioInboxRecord {
+  return {
+    kind: "audio",
+    submissionId: "sub-import-audio",
+    questionId: "companion-animal",
+    createdAt: "2026-08-21T09:00:00.000Z",
+    receivedAt: "2026-08-21T09:00:01.000Z",
+    receiptId: "receipt-import-audio",
+    audio: {
+      objectKey: "cd/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.webm",
+      mimeType: "audio/webm",
+      extension: "webm",
+      sizeBytes: 128_000,
+      sha256: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    },
     ...overrides,
   };
 }
@@ -92,6 +120,15 @@ async function storedIds(): Promise<string[]> {
 async function storedRow(submissionId: string): Promise<Record<string, unknown> | undefined> {
   const { rows } = await inspect().query(
     "SELECT submission_id, kind, question_id, created_at, received_at, receipt_id, original_text, inserted_at FROM submission_inbox WHERE submission_id = $1",
+    [submissionId],
+  );
+  return rows[0];
+}
+
+/** The five media columns, which only a recording's row may carry (MCL-49). */
+async function storedMedia(submissionId: string): Promise<Record<string, unknown> | undefined> {
+  const { rows } = await inspect().query(
+    "SELECT media_object_key, media_mime_type, media_extension, media_size_bytes, media_sha256, original_text FROM submission_inbox WHERE submission_id = $1",
     [submissionId],
   );
   return rows[0];
@@ -242,6 +279,105 @@ describe.skipIf(!ENABLED)("import-inbox-jsonl", () => {
     // The whole run, one transaction: the fresh row of line 1 is gone with the refusal
     // of line 2, so the operator never has to work out how far the import got.
     expect(await storedIds()).toEqual(["sub-import-1"]);
+  });
+
+  it("imports a file holding both a typed answer and a recording", async () => {
+    // The cutover file after MCL-49 is mixed. The importer bound seven columns and refused
+    // anything that was not kind text, so this whole file failed - loudly, but it failed:
+    // an operator moving a real inbox to PostgreSQL could not complete the move at all.
+    const path = await jsonlFile([sourceRecord(), sourceRecording()]);
+
+    const run = runImport(path);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("imported 2, already present 0, of 2 record(s)");
+    expect(await storedIds()).toEqual(["sub-import-1", "sub-import-audio"]);
+
+    const media = await storedMedia("sub-import-audio");
+    expect(media).toEqual({
+      media_object_key:
+        "cd/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.webm",
+      media_mime_type: "audio/webm",
+      media_extension: "webm",
+      // bigint comes back as text: node-postgres refuses to lose precision silently.
+      media_size_bytes: "128000",
+      media_sha256: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    // NULL, not an empty string. A spoken answer's original IS the recording, and a
+    // zero-length text here would be indistinguishable from a child who wrote nothing -
+    // which is also what submission_inbox_kind_shape refuses.
+      original_text: null,
+    });
+
+    // And the typed answer beside it is untouched by the widening.
+    expect((await storedRow("sub-import-1"))?.original_text).toBe(
+      "  ein drache mit  zwei koepfen  ",
+    );
+  });
+
+  it("counts a re-run of the mixed file as already present, both kinds", async () => {
+    const path = await jsonlFile([sourceRecord(), sourceRecording()]);
+    expect(runImport(path).status).toBe(0);
+    const before = await storedRow("sub-import-audio");
+
+    const rerun = runImport(path);
+
+    expect(rerun.status).toBe(0);
+    expect(rerun.stdout).toContain("imported 0, already present 2, of 2 record(s)");
+    // inserted_at is a column default, so an UPDATE or a delete-and-reinsert would move
+    // it. The recording's row was compared, not rewritten.
+    expect(await storedRow("sub-import-audio")).toEqual(before);
+  });
+
+  it("fails the import when a stored recording's digest differs from the file's", async () => {
+    // The media columns are immutable too. Without them in the comparison a re-run over a
+    // row whose object key or digest had diverged would report a clean idempotent import,
+    // which is the exact failure this suite was written for on the text side.
+    expect(runImport(await jsonlFile([sourceRecording()])).status).toBe(0);
+    const before = await storedRow("sub-import-audio");
+
+    const run = runImport(
+      await jsonlFile([
+        sourceRecording({
+          audio: {
+            ...sourceRecording().audio,
+            objectKey:
+              "ef/efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef.webm",
+            sha256: "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+          },
+        }),
+      ]),
+    );
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("conflicting record already in submission_inbox");
+    expect(run.stderr).toContain("audioObjectKey");
+    expect(run.stderr).toContain("audioSha256");
+    expect(await storedRow("sub-import-audio")).toEqual(before);
+  });
+
+  it("still refuses a kind no submission has ever had, and writes nothing", async () => {
+    const run = runImport(
+      await jsonlFile([sourceRecord(), { ...sourceRecord(), submissionId: "sub-x", kind: "video" }]),
+    );
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("malformed submissions.jsonl");
+    expect(run.stderr).toContain("line 2");
+    // Refused before anything is inserted - the file is validated in full first - so the
+    // operator never has to work out how far a half-import got.
+    expect(await storedIds()).toEqual([]);
+  });
+
+  it("refuses a recording whose media block cannot be read", async () => {
+    const run = runImport(
+      await jsonlFile([
+        { ...sourceRecording(), audio: { ...sourceRecording().audio, sha256: "not-a-digest" } },
+      ]),
+    );
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("line 1");
+    expect(await storedIds()).toEqual([]);
   });
 
   it("refuses a file whose own two lines claim one submission with different text", async () => {

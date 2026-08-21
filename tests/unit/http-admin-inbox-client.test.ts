@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HttpAdminInboxClient } from "@/adapters/http/http-admin-inbox-client";
 import type { InboxPage } from "@/application/submissions/submission-inbox-reader";
+import { asTextEntry } from "../support/text-submission-shape";
 
 const page: InboxPage = {
   entries: [
@@ -40,7 +41,7 @@ describe("HttpAdminInboxClient", () => {
     if (result.outcome !== "granted") return;
     // Not trimmed, not normalised: the whole point of the read side is that what an
     // adult sees is what the child sent.
-    expect(result.page.entries[0].originalText).toBe("  ein drache mit  zwei koepfen  ");
+    expect(asTextEntry(result.page.entries[0]).originalText).toBe("  ein drache mit  zwei koepfen  ");
     expect(result.page.total).toBe(1);
   });
 

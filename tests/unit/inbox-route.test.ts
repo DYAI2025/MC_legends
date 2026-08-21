@@ -8,6 +8,7 @@ import type { InboxRecord } from "@/application/submissions/submission-inbox-sto
 import { resetRateLimitersForTest } from "@/composition/server";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
 import { familySessionCookieHeader } from "../support/family-session-header";
+import { asTextRecord } from "../support/text-submission-shape";
 
 const ENDPOINT = "http://localhost/api/inbox/submissions";
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
@@ -277,7 +278,7 @@ describe("POST /api/inbox/submissions", () => {
     expect(retry.status).toBe(200);
     const records = await inboxLines();
     expect(records).toHaveLength(1);
-    expect(records[0].originalText).toBe(ORIGINAL_TEXT);
+    expect(asTextRecord(records[0]).originalText).toBe(ORIGINAL_TEXT);
     expect(records[0].receiptId).toBe(firstReceipt.receiptId);
   });
 
@@ -462,7 +463,7 @@ describe("POST /api/inbox/submissions", () => {
     expect(response.status).toBe(201);
     const records = await inboxLines(join(directory, ".data", "inbox"));
     expect(records).toHaveLength(1);
-    expect(records[0].originalText).toBe(ORIGINAL_TEXT);
+    expect(asTextRecord(records[0]).originalText).toBe(ORIGINAL_TEXT);
   });
 
   it("reports an unavailable inbox with a stable code and no internal detail", async () => {

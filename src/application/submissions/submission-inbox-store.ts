@@ -1,19 +1,46 @@
-export type InboxRecord = Readonly<{
-  /**
-   * Which kind of submission this line holds, mirroring TextSubmission.kind. Only text
-   * exists today; MCL-30 adds audio, and without this field the lines already on disk
-   * would be indistinguishable from the audio ones written after it. Widening this
-   * union later makes the compiler find every site that has to choose.
-   */
-  kind: "text";
+import type { AudioArtifact } from "@/domain/media/audio-artifact";
+
+/**
+ * The fields every stored submission has, whatever kind it is.
+ *
+ * `kind` is the discriminant, mirroring Submission.kind. Without it the text lines already
+ * on disk would be indistinguishable from the audio ones written after MCL-49, which is
+ * exactly the ambiguity the field was reserved to prevent.
+ */
+type InboxRecordBase = Readonly<{
   receiptId: string;
   receivedAt: string;
   submissionId: string;
   questionId: string;
   createdAt: string;
-  /** Unchanged original text as submitted. */
-  originalText: string;
 }>;
+
+export type TextInboxRecord = InboxRecordBase &
+  Readonly<{
+    kind: "text";
+    /** Unchanged original text as submitted. */
+    originalText: string;
+  }>;
+
+/**
+ * One stored audio answer, as metadata only (MCL-49).
+ *
+ * The bytes are not here and must never be: they live in the private blob store, and this
+ * record is what goes into a database row. `audio.objectKey` is the reference between the
+ * two, and it is derived from a server-computed hash rather than from anything a client
+ * sent - which is what makes it safe to put in a path.
+ *
+ * A union member rather than optional fields on one flat record. Optional fields would make
+ * "an audio record whose objectKey is missing" a representable value, and the shape of that
+ * bug is a database row promising a recording that was never written.
+ */
+export type AudioInboxRecord = InboxRecordBase &
+  Readonly<{
+    kind: "audio";
+    audio: AudioArtifact;
+  }>;
+
+export type InboxRecord = TextInboxRecord | AudioInboxRecord;
 
 /**
  * What one delivery attempt did to the store.

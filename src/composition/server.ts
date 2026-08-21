@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { HmacFamilyAccessGate } from "@/adapters/access/hmac-family-access-gate";
 import { InMemoryRateLimiter } from "@/adapters/access/in-memory-rate-limiter";
+import { FileAudioBlobStore } from "@/adapters/persistence/file-audio-blob-store";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-submission-inbox-store";
 import type { FamilyAccessGate } from "@/application/access/family-access";
+import { MAX_AUDIO_BYTES } from "@/domain/media/audio-artifact";
+import type { AudioBlobStore } from "@/application/media/audio-blob-store";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
 import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
+const DEFAULT_MEDIA_DIRECTORY = ".data/media";
 
 /**
  * Server-only composition root. Never import this from browser code - it resolves a
@@ -64,6 +68,85 @@ export function createSubmissionInboxStore(): SubmissionInboxStore {
 export function databaseUrl(): string | null {
   return process.env.DATABASE_URL?.trim() || null;
 }
+
+/**
+ * Where unchanged original recordings are written (MCL-49).
+ *
+ * `||` rather than `??`, for the third time in this module and for the same reason: a
+ * host UI that defines AVALORIA_MEDIA_DIR and leaves it empty has not configured a
+ * directory, and treating that as configured would hand `mkdir` an empty path while the
+ * site and its health check still looked fine.
+ *
+ * Separate from AVALORIA_INBOX_DIR rather than a subdirectory of it. The inbox directory
+ * is MCL-48's rollback artefact - a JSONL file that is read by an importer and must stay
+ * small enough to reason about by eye. Recordings are megabytes and have a different
+ * backup sizing, a different retention question and a different reason to exist. Putting
+ * them under one path would mean one volume, one quota and one restore that has to
+ * succeed for either to work.
+ *
+ * There is deliberately no PostgreSQL branch here. The recording never goes in the
+ * database - that is the whole separation MCL-49 asks for - so unlike the inbox store
+ * there is nothing for DATABASE_URL to select between.
+ */
+export function createAudioBlobStore(): AudioBlobStore {
+  return new FileAudioBlobStore(
+    process.env.AVALORIA_MEDIA_DIR?.trim() || DEFAULT_MEDIA_DIRECTORY,
+  );
+}
+
+/**
+ * The largest audio upload this server accepts, in bytes.
+ *
+ * MAX_AUDIO_BYTES is a ceiling, not a default: a deployment may configure a SMALLER value
+ * and can never configure a larger one. `Math.min` is the whole rule, and it is structural
+ * rather than a matter of a validator being called - there is no path through this function
+ * that returns more than the product maximum.
+ *
+ * Measured on a135e2b, when it was only a default. A host that set 33554432 widened the
+ * upload route past what migration 0002 allows, and the two persistence modes then failed
+ * differently for the same request. In PostgreSQL mode the route wrote the blob first -
+ * which is the correct ordering, and precisely why the limit has to be right before that
+ * write - and the CHECK then refused the row; the bytes are deliberately never deleted
+ * after a database failure, so every attempt left an orphan recording on disk. In the
+ * MCL-48 file rollback mode nothing refused it at all: a JSONL file carries no CHECK, so
+ * the recording was stored and the child was given a receipt for it.
+ *
+ * Clamped rather than refused, and that is a judgement about which failure is worse. An
+ * over-wide value is a configuration typo, not a missing credential; the gates answer
+ * `unavailable` because a missing secret must close the door, but taking the upload route
+ * down over a typo would turn a harmless mistake into a child's answer that cannot be sent.
+ * Clamping fails safe in the only direction that matters.
+ *
+ * Clamping is reported, once per process, because a configured value that is silently
+ * ignored is the failure mode this project does not accept: whoever set it has to be able
+ * to find out from a log that the running server is not honouring it. Once rather than per
+ * call, since this sits on the hot path of every upload.
+ *
+ * The number still has to agree with two things this function cannot see: the CHECK
+ * constraint in migration 0002, and `client_max_body_size` on the reverse proxy - which
+ * must be HIGHER, to allow for framing overhead. A proxy limit below the app's turns a
+ * legitimate recording into a 413 the app never sees and therefore cannot explain.
+ */
+export function audioMaxBytes(): number {
+  const configured = positiveInteger(process.env.AVALORIA_AUDIO_MAX_BYTES, MAX_AUDIO_BYTES);
+
+  if (configured > MAX_AUDIO_BYTES && !hasWarnedAboutAudioMaxBytes) {
+    hasWarnedAboutAudioMaxBytes = true;
+    console.warn(
+      "AVALORIA_AUDIO_MAX_BYTES is above the product maximum and was clamped to it",
+    );
+  }
+
+  return Math.min(configured, MAX_AUDIO_BYTES);
+}
+
+/**
+ * Process-local, like the rate limiters below and for the same reason: it exists to make
+ * the warning above happen once rather than on every upload. A test that needs to see it
+ * again uses vi.resetModules() and a fresh dynamic import, which is how the rest of this
+ * suite handles module state.
+ */
+let hasWarnedAboutAudioMaxBytes = false;
 
 export function createReceiptId(): string {
   return randomUUID();
@@ -192,6 +275,7 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
  * test set them before the first request.
  */
 let protectedRouteLimiter: RateLimiter | null = null;
+let audioInboxLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
 let globalFamilySessionLimiter: RateLimiter | null = null;
 let adminRouteLimiter: RateLimiter | null = null;
@@ -204,6 +288,27 @@ export function createProtectedRouteRateLimiter(): RateLimiter {
     windowMs: positiveInteger(process.env.AVALORIA_INBOX_RATE_WINDOW_MS, 60_000),
   });
   return protectedRouteLimiter;
+}
+
+/**
+ * The audio upload's own bucket, separate from the text inbox's (MCL-49).
+ *
+ * Lower than the text inbox's 30, and the reason is the resource rather than the verb:
+ * one text submission is at most 16 KiB, one recording is up to 8 MiB. At 30 per minute
+ * per caller the text route can cost this server half a megabyte; the audio route at the
+ * same allowance could cost it 240 MiB of buffering and disk, per address, per minute.
+ * The scarce thing here is bytes, so the count that bounds them is a different number.
+ *
+ * A separate bucket rather than a shared one for the same reason the admin read has its
+ * own: a child submitting recordings must not be able to exhaust the allowance for typed
+ * answers, nor the other way round.
+ */
+export function createAudioInboxRateLimiter(): RateLimiter {
+  audioInboxLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_AUDIO_RATE_LIMIT, 10),
+    windowMs: positiveInteger(process.env.AVALORIA_AUDIO_RATE_WINDOW_MS, 60_000),
+  });
+  return audioInboxLimiter;
 }
 
 export function createFamilySessionRateLimiter(): RateLimiter {
@@ -288,6 +393,10 @@ export function createGlobalAdminSessionRateLimiter(): RateLimiter {
 
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
+  // A limiter missing from this list makes every later test in the process inherit the
+  // previous one's count - which shows up as a rate-limit case that passes alone and a
+  // 429 in a test that was not about rate limiting at all.
+  audioInboxLimiter = null;
   familySessionLimiter = null;
   globalFamilySessionLimiter = null;
   adminRouteLimiter = null;

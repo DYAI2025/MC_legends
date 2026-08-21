@@ -3,6 +3,7 @@ import { guardFamilyRequest } from "@/adapters/http/family-request-guard";
 import {
   SubmissionPayloadError,
   type InboxRecord,
+  type TextInboxRecord,
 } from "@/application/submissions/submission-inbox-store";
 import {
   createFamilyAccessGate,
@@ -21,7 +22,7 @@ import {
 
 /** The fields a client submits; the receipt fields are added by this server. */
 type SubmittedFields = Pick<
-  InboxRecord,
+  TextInboxRecord,
   "submissionId" | "questionId" | "createdAt" | "originalText"
 >;
 
@@ -182,7 +183,7 @@ export async function POST(request: Request): Promise<Response> {
   // validator happening to drop a client-supplied one.
   // kind is set here, not read from the payload: this route validates a text answer
   // and nothing else, so a client claiming otherwise must not be believed.
-  const record: InboxRecord = {
+  const record: TextInboxRecord = {
     ...fields,
     kind: "text",
     receiptId: createReceiptId(),
