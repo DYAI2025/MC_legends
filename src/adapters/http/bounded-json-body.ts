@@ -32,14 +32,23 @@ export function declaresAcceptableSize(request: Request, maxBodyBytes: number): 
 }
 
 /**
- * Reads the body with a hard byte cap instead of buffering whatever arrives. Returns
- * null as soon as the cap is passed, so an oversized body is abandoned mid-stream and
- * never fully held in memory or handed to the parser.
+ * Reads the body with a hard byte cap and returns the raw bytes, or null for every
+ * refusal.
+ *
+ * Extracted from readBoundedBody so a second caller gets exactly the same streaming
+ * guarantee - an oversized body is abandoned mid-stream and never fully held in memory -
+ * without the decode step. An audio upload (MCL-49) has to survive byte for byte, so
+ * there is nothing here to decode, and a decode that "succeeded" on a recording would be
+ * the bug rather than the check.
+ *
+ * The cap is `>`, not `>=`: a body of exactly maxBodyBytes is the documented maximum and
+ * has to be accepted, or the largest legitimate recording would be refused with no way to
+ * tell that refusal from a genuinely oversized one.
  */
-export async function readBoundedBody(
+export async function readBoundedBytes(
   request: Request,
   maxBodyBytes: number,
-): Promise<string | null> {
+): Promise<Uint8Array | null> {
   const stream = request.body;
   if (stream === null) {
     return null;
@@ -56,6 +65,8 @@ export async function readBoundedBody(
 
       received += value.byteLength;
       if (received > maxBodyBytes) {
+        // Cancelled rather than read to the end: the point of the cap is that this
+        // server never buffers what it is going to refuse.
         await reader.cancel();
         return null;
       }
@@ -70,9 +81,34 @@ export async function readBoundedBody(
       offset += chunk.byteLength;
     }
 
+    return merged;
+  } catch {
+    // A body that fails mid-transfer is a refusal like any other: the caller must not
+    // learn which guard said no, and a partial body is not a payload.
+    return null;
+  }
+}
+
+/**
+ * Reads the body with the same hard byte cap and decodes it strictly as UTF-8.
+ *
+ * The cap and the decode are two steps rather than one so that the byte-oriented caller
+ * above cannot drift away from this one's streaming guarantee. Behaviour here is
+ * unchanged by that split, and the cases in tests/unit/bounded-json-body.test.ts pin it.
+ */
+export async function readBoundedBody(
+  request: Request,
+  maxBodyBytes: number,
+): Promise<string | null> {
+  const bytes = await readBoundedBytes(request, maxBodyBytes);
+  if (bytes === null) {
+    return null;
+  }
+
+  try {
     // Strict decoding: malformed UTF-8 must be refused, not silently replaced,
     // because the submitted text has to survive byte for byte.
-    return new TextDecoder("utf-8", { fatal: true }).decode(merged);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return null;
   }
