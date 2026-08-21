@@ -74,6 +74,9 @@ const SELECT = `SELECT ${COLUMNS} FROM submission_inbox WHERE submission_id = $1
  */
 const ENTRY_COLUMNS = `${COLUMNS}, status`;
 
+/** The read side's single-entry lookup (MCL-49), by the primary key. */
+const SELECT_ENTRY = `SELECT ${ENTRY_COLUMNS} FROM submission_inbox WHERE submission_id = $1`;
+
 /**
  * Newest-first, with submission_id as the tiebreaker.
  *
@@ -513,6 +516,23 @@ export class PostgresSubmissionInboxStore
       // rather than trusting whatever the driver decided a bigint should become.
       total: Number(counted.rows[0]?.total ?? "0"),
     };
+  }
+
+  /**
+   * One entry by submission id (MCL-49), which is the primary key - so this is an index
+   * lookup and not a filtered scan, and it can return at most one row by construction.
+   *
+   * Mapped through the same `toEntry` the list side uses, so the entry the playback route
+   * acts on is the same shape the admin list showed. A second mapping here is how the two
+   * would eventually disagree about what a stored recording is.
+   */
+  async find(submissionId: string): Promise<InboxEntry | null> {
+    const pool = poolFor(this.connectionString);
+
+    const found = await run<InboxEntryRow>(pool, SELECT_ENTRY, [submissionId]);
+    const row = found.rows[0];
+
+    return row === undefined ? null : toEntry(row);
   }
 
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {

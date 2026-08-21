@@ -113,4 +113,23 @@ export const MAX_INBOX_PAGE_SIZE = 200;
  */
 export interface SubmissionInboxReader {
   list(query: InboxQuery): Promise<InboxPage>;
+
+  /**
+   * One entry by its submission id, or null when the inbox does not hold it.
+   *
+   * On this port rather than a port of its own (MCL-49). Playing a recording back is a
+   * read of the protected inbox by the admin identity - the same capability, the same
+   * gate, the same adapter pair - and a third port would be a third thing the composition
+   * root can hand to the wrong route. The playback route needs the object key and the
+   * stored mime type, and both of them are already what this port returns.
+   *
+   * `null` rather than a throw for the absent case. "No such submission" is a normal
+   * answer to an id typed into a URL, and the route turns it into a 404; a throw would
+   * make an ordinary miss indistinguishable from a database that is down.
+   *
+   * Never a lookup by object key. The key is a filesystem path fragment, and a read port
+   * that accepted one would be a way to ask this application for a file rather than for a
+   * submission.
+   */
+  find(submissionId: string): Promise<InboxEntry | null>;
 }

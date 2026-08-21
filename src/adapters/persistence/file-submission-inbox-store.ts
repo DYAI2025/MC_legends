@@ -291,4 +291,18 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
       total: matching.length,
     };
   }
+
+  /**
+   * One entry by submission id (MCL-49), over the same scan the duplicate check uses.
+   *
+   * Deliberately `findBySubmissionId` rather than a second scan of its own: the write
+   * side's idea of "the store already holds this submission" and the read side's idea of
+   * "this submission exists" have to be the same idea, including which damaged lines they
+   * both skip. Two scans over one format would eventually disagree, and the disagreement
+   * would look like a submission that blocks a retry and cannot be played back.
+   */
+  async find(submissionId: string): Promise<InboxEntry | null> {
+    const record = await this.findBySubmissionId(submissionId);
+    return record === null ? null : toEntry(record);
+  }
 }
