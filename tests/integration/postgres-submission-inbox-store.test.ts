@@ -18,6 +18,7 @@ import {
   unlockSubmissionInboxTable,
 } from "../support/submission-inbox-table-lock";
 import { asTextRecord } from "../support/text-submission-shape";
+import type { AudioInboxRecord } from "@/application/submissions/submission-inbox-store";
 
 /**
  * A real PostgreSQL is the whole point of this file. `ON CONFLICT` holding under two
@@ -303,6 +304,176 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
     expect(asTextRecord(outcome.stored === false ? outcome.existing : undefined).originalText).toBe(
       originalText,
     );
+  });
+});
+
+/**
+ * Migration 0002 and the audio half of the adapter (MCL-49).
+ *
+ * These pin the three ways an audio row can be wrong in a way no unit test can see,
+ * because all three are enforced by PostgreSQL and not by TypeScript:
+ *
+ * 1. `submission_inbox_kind_shape` - an audio row whose media columns are missing, or a
+ *    text row that smuggled some in. Without the constraint, "kind='audio' with a NULL
+ *    object key" is storable, and that row is a child told their recording arrived while
+ *    it points at nothing.
+ * 2. The size ceiling and the hash shape, which are the two values a second writer could
+ *    otherwise widen without touching the application.
+ * 3. bigint round-tripping. `media_size_bytes` leaves the driver as a string; a
+ *    `Number()` that rounds would put a byte count in the database that disagrees with
+ *    the file on disk.
+ */
+describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore, audio submissions", () => {
+  const SHA = "b".repeat(64);
+
+  function audioRecord(overrides: Partial<AudioInboxRecord> = {}): AudioInboxRecord {
+    return {
+      kind: "audio",
+      submissionId: "sub-audio-1",
+      questionId: "companion-animal",
+      createdAt: "2026-08-21T09:00:00.000Z",
+      receivedAt: "2026-08-21T09:00:01.000Z",
+      receiptId: "receipt-audio-1",
+      audio: {
+        objectKey: `bb/${SHA}.webm`,
+        mimeType: "audio/webm",
+        extension: "webm",
+        sizeBytes: 128_000,
+        sha256: SHA,
+      },
+      ...overrides,
+    };
+  }
+
+  beforeEach(emptyTable);
+
+  it("round-trips every audio field the acceptance criteria name", async () => {
+    const store = await createStore();
+    const record = audioRecord();
+
+    await expect(store.appendIfAbsent(record)).resolves.toEqual({ stored: true });
+
+    const outcome = await store.appendIfAbsent(audioRecord({ receiptId: "receipt-audio-retry" }));
+    expect(outcome.stored).toBe(false);
+
+    const kept = outcome.stored === false ? outcome.existing : undefined;
+    expect(kept?.kind).toBe("audio");
+    if (kept === undefined || kept.kind !== "audio") throw new Error("expected an audio record");
+
+    // Every field, not a spot check: each one is a separate MCL-49 acceptance criterion.
+    expect(kept.audio).toEqual(record.audio);
+    // And the receipt the FIRST delivery minted, not the retry's - the same rule the text
+    // path follows, so one submissionId can never carry two receipts.
+    expect(kept.receiptId).toBe("receipt-audio-1");
+  });
+
+  it("keeps the byte count exact rather than rounding it through a JS number", async () => {
+    const store = await createStore();
+    // 8 MiB exactly: the documented ceiling, which must be accepted rather than refused
+    // by an off-by-one in the CHECK.
+    await store.appendIfAbsent(
+      audioRecord({ audio: { ...audioRecord().audio, sizeBytes: 8_388_608 } }),
+    );
+
+    const { rows } = await inspect().query<{ media_size_bytes: string }>(
+      "SELECT media_size_bytes FROM submission_inbox WHERE submission_id = $1",
+      ["sub-audio-1"],
+    );
+    expect(rows[0].media_size_bytes).toBe("8388608");
+  });
+
+  it("refuses an audio row whose media columns are missing", async () => {
+    await expect(
+      inspect().query(
+        `INSERT INTO submission_inbox
+           (submission_id, kind, question_id, created_at, received_at, receipt_id, original_text)
+         VALUES ('sub-broken', 'audio', 'q', now(), now(), 'r-broken', NULL)`,
+      ),
+    ).rejects.toThrow(/submission_inbox_kind_shape/);
+  });
+
+  it("refuses a text row that carries media columns", async () => {
+    await expect(
+      inspect().query(
+        `INSERT INTO submission_inbox
+           (submission_id, kind, question_id, created_at, received_at, receipt_id,
+            original_text, media_object_key, media_mime_type, media_extension,
+            media_size_bytes, media_sha256)
+         VALUES ('sub-mixed', 'text', 'q', now(), now(), 'r-mixed', 'hallo',
+                 $1, 'audio/webm', 'webm', 10, $2)`,
+        [`bb/${SHA}.webm`, SHA],
+      ),
+    ).rejects.toThrow(/submission_inbox_kind_shape/);
+  });
+
+  it("refuses a MIME type, a hash and a size the application would never produce", async () => {
+    const insert = (mime: string, sha: string, size: number) =>
+      inspect().query(
+        `INSERT INTO submission_inbox
+           (submission_id, kind, question_id, created_at, received_at, receipt_id,
+            original_text, media_object_key, media_mime_type, media_extension,
+            media_size_bytes, media_sha256)
+         VALUES ('sub-bad', 'audio', 'q', now(), now(), 'r-bad', NULL,
+                 $1, $2, 'webm', $3, $4)`,
+        [`bb/${SHA}.webm`, mime, size, sha],
+      );
+
+    // Not on the allowlist - the case where a second writer widens the formats without
+    // touching the application.
+    await expect(insert("application/x-msdownload", SHA, 10)).rejects.toThrow(
+      /submission_inbox_media_mime_known/,
+    );
+    // Uppercase hex: parses as a hash everywhere except in the object key the application
+    // derives from it, which would then name a file that does not exist.
+    await expect(insert("audio/webm", "B".repeat(64), 10)).rejects.toThrow(
+      /submission_inbox_media_sha256_shape/,
+    );
+    // One byte over the documented 8 MiB ceiling.
+    await expect(insert("audio/webm", SHA, 8_388_609)).rejects.toThrow(
+      /submission_inbox_media_size_bounded/,
+    );
+  });
+
+  it("stores two different submissions that share one recording", async () => {
+    // Content addressing means identical bytes produce an identical object key. Two
+    // children forwarding the same voice memo is a legitimate pair of answers, and an
+    // over-eager UNIQUE constraint on media_object_key would refuse the second one - so
+    // this test exists to keep anybody from adding it.
+    const store = await createStore();
+
+    await expect(store.appendIfAbsent(audioRecord())).resolves.toEqual({ stored: true });
+    await expect(
+      store.appendIfAbsent(
+        audioRecord({ submissionId: "sub-audio-2", receiptId: "receipt-audio-2" }),
+      ),
+    ).resolves.toEqual({ stored: true });
+
+    const { rows } = await inspect().query<{ total: string }>(
+      "SELECT count(*)::text AS total FROM submission_inbox WHERE media_object_key = $1",
+      [`bb/${SHA}.webm`],
+    );
+    expect(rows[0].total).toBe("2");
+  });
+
+  it("shows an audio answer on the protected read side without leaking a path", async () => {
+    // The adapter directly, not createStore(): that helper empties the table on every
+    // call and hands back the write port alone, so reading through it would report an
+    // inbox it had just cleared.
+    const store = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+    await store.appendIfAbsent(audioRecord());
+
+    const page = await store.list({ kind: "audio" });
+    expect(page.total).toBe(1);
+
+    const entry = page.entries[0];
+    expect(entry.kind).toBe("audio");
+    if (entry.kind !== "audio") throw new Error("expected an audio entry");
+
+    expect(entry.audio.sha256).toBe(SHA);
+    expect(entry.audio.mimeType).toBe("audio/webm");
+    expect(entry.status).toBe("RECEIVED");
+    // The filter is exact: asking for text must not return the recording.
+    expect((await store.list({ kind: "text" })).total).toBe(0);
   });
 });
 
