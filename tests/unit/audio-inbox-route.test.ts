@@ -382,6 +382,30 @@ describe("POST /api/inbox/submissions/audio validation", () => {
     expect(asAudioRecord((await inboxLines())[0]).audio.sizeBytes).toBe(MAX_AUDIO_BYTES);
   });
 
+  it("cannot be widened past the maximum by AVALORIA_AUDIO_MAX_BYTES", async () => {
+    // MCL-49 finding F1, at the route and in the store mode where nothing else would have
+    // caught it. This case runs against the real FileSubmissionInboxStore - MCL-48's
+    // rollback path - which carries no CHECK constraint, so before the clamp the record
+    // was appended and the child was handed a receipt for a recording production refuses.
+    vi.stubEnv("AVALORIA_AUDIO_MAX_BYTES", "33554432");
+
+    const store = vi.fn<AudioBlobStore["store"]>().mockResolvedValue(undefined);
+    overrides.blobStore = { store, read: vi.fn(), checkWritable: vi.fn() };
+
+    const overCap: Uint8Array<ArrayBuffer> = new Uint8Array(MAX_AUDIO_BYTES + 1).fill(0x11);
+    overCap.set(WEBM.slice(0, 9), 0);
+
+    const response = await POST(audioRequest(overCap));
+
+    await expectRefusal(response, 400, "invalid-payload");
+    // Before blob persistence, which is the part that cannot be undone: the bytes are
+    // written first by design and are deliberately never deleted after a later failure,
+    // so a refusal that arrived one step later would leave an orphan recording behind for
+    // every attempt.
+    expect(store).not.toHaveBeenCalled();
+    expect(await inboxLines()).toEqual([]);
+  });
+
   it("refuses an empty body", async () => {
     const response = await POST(audioRequest(new Uint8Array(0) as Uint8Array<ArrayBuffer>));
 
