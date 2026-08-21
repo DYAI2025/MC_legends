@@ -14,13 +14,15 @@
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 
-const COLUMNS = "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text";
+const COLUMNS =
+  "submission_id, kind, question_id, created_at, received_at, receipt_id, original_text, " +
+  "media_object_key, media_mime_type, media_extension, media_size_bytes, media_sha256";
 
 /** Mirrors the adapter's INSERT: same columns, same conflict target, same DO NOTHING. */
 const INSERT = `
   INSERT INTO submission_inbox
     (${COLUMNS})
-  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
   ON CONFLICT (submission_id) DO NOTHING
   RETURNING submission_id
 `;
@@ -36,7 +38,15 @@ const INSERT = `
  */
 const SELECT_EXISTING = `SELECT ${COLUMNS} FROM submission_inbox WHERE submission_id = $1`;
 
-/** The immutable fields, in the order the INSERT binds them. */
+/**
+ * The immutable fields, in the order the INSERT binds them.
+ *
+ * The five media fields are on this list and not merely bound (MCL-49). A comparison that
+ * covered only the text columns would let a re-run report "already present" over a row
+ * whose object key or digest had diverged from the file - which is precisely the failure
+ * this script's conflict check was written to close on the text side, reopened for
+ * recordings. Names only ever reach an operator's terminal; values never do.
+ */
 const IMMUTABLE_FIELDS = [
   "submissionId",
   "kind",
@@ -45,7 +55,27 @@ const IMMUTABLE_FIELDS = [
   "receivedAt",
   "receiptId",
   "originalText",
+  "audioObjectKey",
+  "audioMimeType",
+  "audioExtension",
+  "audioSizeBytes",
+  "audioSha256",
 ];
+
+/**
+ * The kinds a line may declare, mirroring the CHECK in migration 0002 and the union in
+ * src/application/submissions/submission-inbox-store.ts.
+ *
+ * Duplicated here rather than imported, and that duplication is deliberate: this script is
+ * plain `.mjs` run by `node` with no build step, so it cannot import a `.ts` module at all.
+ */
+const KNOWN_KINDS = ["text", "audio"];
+
+/** The audio MIME types the schema will accept, mirroring submission_inbox_media_mime_known. */
+const KNOWN_AUDIO_MIME_TYPES = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"];
+
+/** 64 lowercase hex characters, mirroring submission_inbox_media_sha256_shape. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 /** The InboxRecord fields that must be present and non-empty on every line. */
 const IDENTIFIERS = ["receiptId", "submissionId", "questionId"];
@@ -139,12 +169,15 @@ function toValues(lineNumber, line) {
     throw new MalformedLineError(lineNumber, "is not a JSON object");
   }
 
-  // Checked, not cast. The kind CHECK constraint in 0001_submission_inbox.sql would
-  // refuse an unknown kind anyway, but only after the transaction is open and with an
-  // error that names the constraint rather than the line - and MCL-49 will widen this
-  // union, at which point the importer must be revisited deliberately.
-  if (parsed.kind !== "text") {
-    throw new MalformedLineError(lineNumber, `kind is not "text": ${JSON.stringify(parsed.kind)}`);
+  // Checked, not cast. The kind CHECK constraint in the schema would refuse an unknown
+  // kind anyway, but only after the transaction is open and with an error that names the
+  // constraint rather than the line. Widening this list is deliberate work: it is what
+  // MCL-49 did when audio became a kind a submission may have.
+  if (!KNOWN_KINDS.includes(parsed.kind)) {
+    throw new MalformedLineError(
+      lineNumber,
+      `kind is not one of ${KNOWN_KINDS.join(", ")}: ${JSON.stringify(parsed.kind)}`,
+    );
   }
 
   for (const field of IDENTIFIERS) {
@@ -156,9 +189,15 @@ function toValues(lineNumber, line) {
   // No trim, no normalisation, no default. `originalText` is a child's own words and the
   // column comment says it is never rewritten; an empty string is a legitimate value
   // here, so only the type is checked.
-  if (typeof parsed.originalText !== "string") {
+  //
+  // A recording carries no text at all, and NULL rather than "" is what the schema
+  // requires: a zero-length string would be indistinguishable from a child who submitted
+  // nothing, and submission_inbox_kind_shape refuses it.
+  if (parsed.kind === "text" && typeof parsed.originalText !== "string") {
     throw new MalformedLineError(lineNumber, "originalText is missing or not a string");
   }
+
+  const media = parsed.kind === "audio" ? mediaValues(lineNumber, parsed.audio) : EMPTY_MEDIA;
 
   const [createdAt, receivedAt] = TIMESTAMPS.map((field) =>
     instant(lineNumber, field, parsed[field]),
@@ -171,7 +210,65 @@ function toValues(lineNumber, line) {
     createdAt,
     receivedAt,
     parsed.receiptId,
-    parsed.originalText,
+    parsed.kind === "text" ? parsed.originalText : null,
+    ...media,
+  ];
+}
+
+/** The five media bindings a typed answer carries, all absent. */
+const EMPTY_MEDIA = [null, null, null, null, null];
+
+/**
+ * The five media values for one recording, or a refusal naming the line.
+ *
+ * Every check mirrors a CHECK constraint in migration 0002. They are duplicated rather
+ * than left to the database for the same reason the kind check is: the constraint would
+ * refuse the row anyway, but only after the transaction is open, and with an error naming
+ * the constraint instead of the line an operator has to go and fix.
+ *
+ * The size is bound as a STRING. The column is bigint, node-postgres round-trips bigint as
+ * text, and a number beyond 2^53 would be silently rounded on the way in - a byte count
+ * that no longer matches the file on disk.
+ */
+function mediaValues(lineNumber, audio) {
+  if (audio === null || typeof audio !== "object" || Array.isArray(audio)) {
+    throw new MalformedLineError(lineNumber, "audio is missing or not an object");
+  }
+
+  for (const field of ["objectKey", "extension"]) {
+    if (typeof audio[field] !== "string" || audio[field].length === 0) {
+      throw new MalformedLineError(
+        lineNumber,
+        `audio.${field} is missing or not a non-empty string`,
+      );
+    }
+  }
+
+  if (!KNOWN_AUDIO_MIME_TYPES.includes(audio.mimeType)) {
+    throw new MalformedLineError(
+      lineNumber,
+      `audio.mimeType is not on the allowlist: ${JSON.stringify(audio.mimeType)}`,
+    );
+  }
+
+  if (typeof audio.sha256 !== "string" || !SHA256_HEX.test(audio.sha256)) {
+    throw new MalformedLineError(lineNumber, "audio.sha256 is not 64 lowercase hex characters");
+  }
+
+  if (
+    typeof audio.sizeBytes !== "number" ||
+    !Number.isSafeInteger(audio.sizeBytes) ||
+    audio.sizeBytes <= 0
+  ) {
+    throw new MalformedLineError(lineNumber, "audio.sizeBytes is not a positive whole byte count");
+  }
+
+  return [
+    audio.objectKey,
+    audio.mimeType,
+    audio.extension,
+    String(audio.sizeBytes),
+    audio.sha256,
   ];
 }
 
@@ -204,6 +301,13 @@ function storedValues(row) {
     storedInstant("received_at", row.received_at),
     row.receipt_id,
     row.original_text,
+    row.media_object_key,
+    row.media_mime_type,
+    row.media_extension,
+    // Already text on the way out of a bigint column, and bound as text on the way in, so
+    // the two sides compare as the same spelling of the same number.
+    row.media_size_bytes,
+    row.media_sha256,
   ];
 }
 
