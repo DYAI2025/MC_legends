@@ -5,6 +5,7 @@ import { FileAudioBlobStore } from "@/adapters/persistence/file-audio-blob-store
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-submission-inbox-store";
 import type { FamilyAccessGate } from "@/application/access/family-access";
+import { MAX_AUDIO_BYTES } from "@/domain/media/audio-artifact";
 import type { AudioBlobStore } from "@/application/media/audio-blob-store";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
@@ -12,9 +13,6 @@ import type { SubmissionInboxReader } from "@/application/submissions/submission
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
 const DEFAULT_MEDIA_DIRECTORY = ".data/media";
-
-/** 8 MiB. See audioMaxBytes below for why the number lives in three places. */
-const DEFAULT_AUDIO_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * Server-only composition root. Never import this from browser code - it resolves a
@@ -99,19 +97,56 @@ export function createAudioBlobStore(): AudioBlobStore {
 /**
  * The largest audio upload this server accepts, in bytes.
  *
- * 8 MiB, decided 2026-08-21. The number is enforced in three places that have to agree -
- * the reverse proxy in front of the app, the upload route, and a CHECK constraint in
- * migration 0002 - and each of them fails differently when they disagree: a proxy limit
- * below the app's turns a legitimate recording into an error the app never sees, and one
- * above it lets the app buffer bytes it is going to refuse.
+ * MAX_AUDIO_BYTES is a ceiling, not a default: a deployment may configure a SMALLER value
+ * and can never configure a larger one. `Math.min` is the whole rule, and it is structural
+ * rather than a matter of a validator being called - there is no path through this function
+ * that returns more than the product maximum.
  *
- * Overridable so a deployment can lower it without a release. Raising it past what the
- * database allows will be refused by the CHECK constraint, which is the intended order:
- * widening the ceiling is a migration, exactly as it is for the text length cap.
+ * Measured on a135e2b, when it was only a default. A host that set 33554432 widened the
+ * upload route past what migration 0002 allows, and the two persistence modes then failed
+ * differently for the same request. In PostgreSQL mode the route wrote the blob first -
+ * which is the correct ordering, and precisely why the limit has to be right before that
+ * write - and the CHECK then refused the row; the bytes are deliberately never deleted
+ * after a database failure, so every attempt left an orphan recording on disk. In the
+ * MCL-48 file rollback mode nothing refused it at all: a JSONL file carries no CHECK, so
+ * the recording was stored and the child was given a receipt for it.
+ *
+ * Clamped rather than refused, and that is a judgement about which failure is worse. An
+ * over-wide value is a configuration typo, not a missing credential; the gates answer
+ * `unavailable` because a missing secret must close the door, but taking the upload route
+ * down over a typo would turn a harmless mistake into a child's answer that cannot be sent.
+ * Clamping fails safe in the only direction that matters.
+ *
+ * Clamping is reported, once per process, because a configured value that is silently
+ * ignored is the failure mode this project does not accept: whoever set it has to be able
+ * to find out from a log that the running server is not honouring it. Once rather than per
+ * call, since this sits on the hot path of every upload.
+ *
+ * The number still has to agree with two things this function cannot see: the CHECK
+ * constraint in migration 0002, and `client_max_body_size` on the reverse proxy - which
+ * must be HIGHER, to allow for framing overhead. A proxy limit below the app's turns a
+ * legitimate recording into a 413 the app never sees and therefore cannot explain.
  */
 export function audioMaxBytes(): number {
-  return positiveInteger(process.env.AVALORIA_AUDIO_MAX_BYTES, DEFAULT_AUDIO_MAX_BYTES);
+  const configured = positiveInteger(process.env.AVALORIA_AUDIO_MAX_BYTES, MAX_AUDIO_BYTES);
+
+  if (configured > MAX_AUDIO_BYTES && !hasWarnedAboutAudioMaxBytes) {
+    hasWarnedAboutAudioMaxBytes = true;
+    console.warn(
+      "AVALORIA_AUDIO_MAX_BYTES is above the product maximum and was clamped to it",
+    );
+  }
+
+  return Math.min(configured, MAX_AUDIO_BYTES);
 }
+
+/**
+ * Process-local, like the rate limiters below and for the same reason: it exists to make
+ * the warning above happen once rather than on every upload. A test that needs to see it
+ * again uses vi.resetModules() and a fresh dynamic import, which is how the rest of this
+ * suite handles module state.
+ */
+let hasWarnedAboutAudioMaxBytes = false;
 
 export function createReceiptId(): string {
   return randomUUID();

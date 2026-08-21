@@ -33,6 +33,24 @@ export const AUDIO_MIME_EXTENSIONS = {
 
 export type AudioMimeType = keyof typeof AUDIO_MIME_EXTENSIONS;
 
+/**
+ * The largest recording this project stores, in bytes. 8 MiB, decided 2026-08-21.
+ *
+ * Here rather than next to the environment read, and that placement is the whole point. It
+ * is a product decision of the same class as the allowlist above - not a property of a
+ * filesystem, an HTTP route or a deployment - and the upload route, both inbox adapters and
+ * the composition root all have to agree on it. This module is the one place all of them
+ * may import, which is what makes the agreement structural instead of four copies of a
+ * number that drift.
+ *
+ * A deployment may LOWER what it accepts, through AVALORIA_AUDIO_MAX_BYTES; the composition
+ * root clamps that value to this one and can never be pushed above it. Widening the product
+ * maximum is a schema migration first - `submission_inbox_media_size_bounded` in
+ * `db/migrations/0002_submission_audio.sql` spells the same number out - and a code change
+ * second, in that order, exactly as it is for the text length cap.
+ */
+export const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+
 const AUDIO_MIME_TYPES = Object.keys(AUDIO_MIME_EXTENSIONS) as readonly AudioMimeType[];
 
 /**
@@ -104,6 +122,13 @@ export type AudioArtifact = Readonly<{
  *
  * Takes the size rather than deriving it, because the only honest source for it is the
  * number of bytes actually written, and this module deliberately never sees the bytes.
+ *
+ * The ceiling is checked here as well as at the route, and the duplication is deliberate:
+ * this is the backstop for a caller that did not come through the composition root. It
+ * throws rather than returning a sentinel, for the same reason audioObjectKey does - a
+ * caller arriving with an oversized size skipped a guard, which is a bug to surface and
+ * not an input to absorb quietly. The upload route calls this BEFORE writing the blob, so
+ * a backstop that does fire cannot leave an orphan recording on the device.
  */
 export function describeAudioArtifact(input: {
   sha256: string;
@@ -112,6 +137,10 @@ export function describeAudioArtifact(input: {
 }): AudioArtifact {
   if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0) {
     throw new Error("audio artifact size must be a positive integer byte count");
+  }
+
+  if (input.sizeBytes > MAX_AUDIO_BYTES) {
+    throw new Error("audio artifact size exceeds the product maximum");
   }
 
   return Object.freeze({

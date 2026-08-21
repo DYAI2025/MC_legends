@@ -1,10 +1,12 @@
 import { mkdir, open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readInboxRecord } from "./inbox-record-shape";
-import type {
-  AppendOutcome,
-  InboxRecord,
-  SubmissionInboxStore,
+import { MAX_AUDIO_BYTES } from "@/domain/media/audio-artifact";
+import {
+  SubmissionPayloadError,
+  type AppendOutcome,
+  type InboxRecord,
+  type SubmissionInboxStore,
 } from "@/application/submissions/submission-inbox-store";
 import {
   MAX_INBOX_PAGE_SIZE,
@@ -110,6 +112,25 @@ export class FileSubmissionInboxStore implements SubmissionInboxStore, Submissio
   constructor(private readonly directory: string) {}
 
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {
+    // This adapter's answer to `submission_inbox_media_size_bounded` (MCL-49 finding F1).
+    //
+    // A JSONL file carries no CHECK constraint, and MCL-48 makes this the store the app
+    // falls back to when DATABASE_URL is removed. Measured on a135e2b, that asymmetry was
+    // load-bearing in the wrong direction: the same oversized recording PostgreSQL refuses
+    // with a 23514 was written here and answered with a receipt, so a rollback quietly
+    // relaxed a product limit at the moment somebody was already dealing with a problem.
+    //
+    // Before the duplicate scan and before mkdir on purpose: a record the store will never
+    // accept must not cost a full read of the file first.
+    //
+    // SubmissionPayloadError rather than a bare Error, because the port draws exactly this
+    // line and the route reads it: a payload no retry can fix ends as a 400, and everything
+    // else is a 503 the caller is invited to try again. It is the same error the PostgreSQL
+    // adapter raises for the same record, which is what the shared store contract pins.
+    if (record.kind === "audio" && record.audio.sizeBytes > MAX_AUDIO_BYTES) {
+      throw new SubmissionPayloadError("audio size exceeds the product maximum");
+    }
+
     return serialize(this.directory, async () => {
       const existing = await this.findBySubmissionId(record.submissionId);
       if (existing !== null) {
