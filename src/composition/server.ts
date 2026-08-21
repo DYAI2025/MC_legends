@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { HmacFamilyAccessGate } from "@/adapters/access/hmac-family-access-gate";
 import { InMemoryRateLimiter } from "@/adapters/access/in-memory-rate-limiter";
+import { FileAudioBlobStore } from "@/adapters/persistence/file-audio-blob-store";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-submission-inbox-store";
 import type { FamilyAccessGate } from "@/application/access/family-access";
+import type { AudioBlobStore } from "@/application/media/audio-blob-store";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
 import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
+const DEFAULT_MEDIA_DIRECTORY = ".data/media";
+
+/** 8 MiB. See audioMaxBytes below for why the number lives in three places. */
+const DEFAULT_AUDIO_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * Server-only composition root. Never import this from browser code - it resolves a
@@ -63,6 +69,48 @@ export function createSubmissionInboxStore(): SubmissionInboxStore {
  */
 export function databaseUrl(): string | null {
   return process.env.DATABASE_URL?.trim() || null;
+}
+
+/**
+ * Where unchanged original recordings are written (MCL-49).
+ *
+ * `||` rather than `??`, for the third time in this module and for the same reason: a
+ * host UI that defines AVALORIA_MEDIA_DIR and leaves it empty has not configured a
+ * directory, and treating that as configured would hand `mkdir` an empty path while the
+ * site and its health check still looked fine.
+ *
+ * Separate from AVALORIA_INBOX_DIR rather than a subdirectory of it. The inbox directory
+ * is MCL-48's rollback artefact - a JSONL file that is read by an importer and must stay
+ * small enough to reason about by eye. Recordings are megabytes and have a different
+ * backup sizing, a different retention question and a different reason to exist. Putting
+ * them under one path would mean one volume, one quota and one restore that has to
+ * succeed for either to work.
+ *
+ * There is deliberately no PostgreSQL branch here. The recording never goes in the
+ * database - that is the whole separation MCL-49 asks for - so unlike the inbox store
+ * there is nothing for DATABASE_URL to select between.
+ */
+export function createAudioBlobStore(): AudioBlobStore {
+  return new FileAudioBlobStore(
+    process.env.AVALORIA_MEDIA_DIR?.trim() || DEFAULT_MEDIA_DIRECTORY,
+  );
+}
+
+/**
+ * The largest audio upload this server accepts, in bytes.
+ *
+ * 8 MiB, decided 2026-08-21. The number is enforced in three places that have to agree -
+ * the reverse proxy in front of the app, the upload route, and a CHECK constraint in
+ * migration 0002 - and each of them fails differently when they disagree: a proxy limit
+ * below the app's turns a legitimate recording into an error the app never sees, and one
+ * above it lets the app buffer bytes it is going to refuse.
+ *
+ * Overridable so a deployment can lower it without a release. Raising it past what the
+ * database allows will be refused by the CHECK constraint, which is the intended order:
+ * widening the ceiling is a migration, exactly as it is for the text length cap.
+ */
+export function audioMaxBytes(): number {
+  return positiveInteger(process.env.AVALORIA_AUDIO_MAX_BYTES, DEFAULT_AUDIO_MAX_BYTES);
 }
 
 export function createReceiptId(): string {

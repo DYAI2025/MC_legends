@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import { databaseUrl } from "@/composition/server";
+import { createAudioBlobStore, databaseUrl } from "@/composition/server";
 
 /**
  * The complete vocabulary of this endpoint's `database` field.
@@ -9,6 +9,14 @@ import { databaseUrl } from "@/composition/server";
  * nothing else may ever appear beside them.
  */
 type DatabaseState = "ok" | "unavailable" | "not-configured";
+
+/**
+ * The complete vocabulary of the `storage` field (MCL-49).
+ *
+ * Two values, not three: unlike the database, the media directory has no "not
+ * configured" state - it always has a default and the store creates it on demand.
+ */
+type StorageState = "ok" | "unavailable";
 
 /**
  * Probes with a short-lived client rather than the adapter's pool.
@@ -52,28 +60,67 @@ async function probeDatabase(connectionString: string): Promise<DatabaseState> {
 }
 
 /**
+ * Whether the private media directory can actually be written to right now (MCL-49).
+ *
+ * A real write and removal, not a `stat`. The three ways this fails in production all
+ * pass a `stat`: a volume that failed to mount and left an empty directory behind, a
+ * filesystem remounted read-only after an error, and a full disk. Each of them fails
+ * every audio submission, and each would leave readiness reporting that storage is fine.
+ *
+ * Reported separately from `database` for the same reason `database` is separate from
+ * `app`: they fail independently and are fixed by different people doing different
+ * things. A single boolean would tell an operator that something is wrong and nothing
+ * about which volume to look at.
+ *
+ * There is no `not-configured` here, unlike the database. The media directory always has
+ * a default and the store creates it on demand, so "no directory configured" is not a
+ * state this can be in - which is exactly why the check has to be a write: the default
+ * inside a container succeeds and is gone at the next redeploy, and only the deployment
+ * can say whether the path is on a persistent volume.
+ */
+async function probeStorage(): Promise<StorageState> {
+  try {
+    await createAudioBlobStore().checkWritable();
+    return "ok";
+  } catch (cause) {
+    // Server-side only and deliberately the whole cause: the errno and the path are what
+    // an operator needs. Never in the response - this route is unauthenticated, and the
+    // path is a detail of the host's filesystem layout.
+    console.error("storage readiness probe failed", cause);
+    return "unavailable";
+  }
+}
+
+/**
  * Readiness, deliberately a second endpoint rather than a change to /api/health.
  *
  * /api/health answers "is this process serving?" and must keep answering that when the
  * database is down. If it reported the database too, a DB outage would look identical
  * to a crashed app and an operator would learn nothing from either. MCL-48 requires the
- * application and PostgreSQL to be checkable separately; this is that second check.
+ * application and PostgreSQL to be checkable separately, and MCL-49 adds storage as a
+ * third independent thing; this is where those three are reported apart.
  *
  * `not-configured` is 200 on purpose. No DATABASE_URL means the file store, which is a
  * legitimate configuration - it is the rollback path - and calling it a fault would page
  * somebody about an app that is working exactly as deployed.
  *
- * The body is public: this route is unauthenticated, and nothing here is derived from
- * the connection string.
+ * The body is public: this route is unauthenticated, and nothing in it is derived from
+ * the connection string or from a filesystem path.
  */
 export async function GET(): Promise<Response> {
   const url = databaseUrl();
-  const database: DatabaseState = url === null ? "not-configured" : await probeDatabase(url);
 
-  return Response.json(
-    { app: "ok", database },
-    { status: database === "unavailable" ? 503 : 200 },
-  );
+  // Both probes, always, and concurrently. Short-circuiting on a failed database would
+  // hide a second fault behind the first, and the shape of that is an operator fixing
+  // PostgreSQL, redeploying, and discovering the volume was never mounted either.
+  const [database, storage] = await Promise.all([
+    url === null ? Promise.resolve<DatabaseState>("not-configured") : probeDatabase(url),
+    probeStorage(),
+  ]);
+
+  const degraded = database === "unavailable" || storage === "unavailable";
+
+  return Response.json({ app: "ok", database, storage }, { status: degraded ? 503 : 200 });
 }
 
 /**
