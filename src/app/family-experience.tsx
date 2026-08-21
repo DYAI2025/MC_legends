@@ -362,11 +362,13 @@ export function FamilyExperience({
               contribute. Absent rather than disabled, for the same reason the textarea
               is - nothing here invites something this browser may not do.
 
-              A sibling of the form, not a field in it. The recording is not part of the
-              answer that gets sent: there is no server path for audio yet, so putting it
-              inside the form would tie it to a submit button that cannot carry it.
+              MCL-30B: a sibling of the form, not a field in it. A recording is its own
+              answer with its own send button, so folding it into this form would tie two
+              unrelated decisions - "my text is finished" and "my recording is finished" -
+              to one press, and a form submit cannot carry eight megabytes of body
+              anyway. The two paths share the question and nothing else.
             */}
-            {familySessionActive ? <AudioAnswerRecorder /> : null}
+            {familySessionActive ? <AudioAnswerRecorder questionId={question.id} /> : null}
           </div>
         </div>
 
