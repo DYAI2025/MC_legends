@@ -16,6 +16,15 @@
 # the bytes cross the network. A manifest computed here after the transfer would agree
 # with a corrupted transfer, because it would be describing the corruption.
 #
+# What "verified" means here: the media archive is checked BY DIGEST against that manifest
+# before this script prints ok or prunes anything - scripts/verify-media-archive.sh does
+# it, and tests/unit/verify-media-archive.test.ts proves it does. Until 2026-08-21 the
+# archive was only listed and counted, which a corrupted transfer survives.
+#
+# MCL_BACKUP_REQUIRE_MEDIA=1 makes an absent media directory a failed run rather than a
+# warning. See the variable below, and docs/ops/MCL-48-backup-restore.md §6.1.1 for the
+# exact point at which setting it stops being optional.
+#
 # Why this is a committed file rather than a heredoc in a runbook: MCL-48's pull script
 # lived only inside a document for its first day, which is how a complete script in a
 # document turns out not to be a script on a disk. This one is reviewed and diffed.
@@ -38,6 +47,22 @@ MEDIA_DIR="${MCL_BACKUP_MEDIA_DIR:-/opt/mc-legends/data/media}"
 DEST="${1:-$HOME/Backups/mc-legends}"
 KEEP_DAYS="${MCL_BACKUP_KEEP_DAYS:-90}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# Turns "there is no media directory on the VPS" from a warning into a failed run.
+#
+# Off by default, which is the pre-audio state: no client posts a recording yet, the
+# directory legitimately does not exist, and a database-only set is a complete backup.
+# From the moment audio persistence is live it is the opposite - a missing directory is
+# data loss and a green DB-only backup is a lie - so the launchd job must set this. The
+# exact moment, and how to check it, is docs/ops/MCL-48-backup-restore.md §6.1.1.
+#
+# Only the literal 1 turns it on, so there is one documented value and no argument about
+# whether "true", "yes" or "on" counts.
+REQUIRE_MEDIA="${MCL_BACKUP_REQUIRE_MEDIA:-0}"
+
+# Resolved from this file's own location rather than the caller's working directory: the
+# job that runs this unattended starts in whatever directory launchd chose.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SET="$DEST/$STAMP"
 DUMP="$SET/mcl-$STAMP.dump"
@@ -89,6 +114,13 @@ fi
 MEDIA_STATE="$("${SSH[@]}" "test -d '$MEDIA_DIR' && echo present || echo absent")"
 
 if [ "$MEDIA_STATE" = "absent" ]; then
+  if [ "$REQUIRE_MEDIA" = "1" ]; then
+    # No warning and no set: once audio persistence is live, a database-only backup that
+    # exits 0 is worse than no backup, because nobody goes looking for the recordings
+    # until the day they need them.
+    fail "$VPS:$MEDIA_DIR does not exist and MCL_BACKUP_REQUIRE_MEDIA=1"
+  fi
+
   MEDIA_FILES=0
   echo "warning: $VPS:$MEDIA_DIR does not exist - no media stream in this set" >&2
   echo "         expected until AVALORIA_MEDIA_DIR is configured; see docs/ops/MCL-49-audio-storage.md" >&2
@@ -112,6 +144,23 @@ else
   if [ "$TAR_FILES" != "$MEDIA_FILES" ]; then
     mv "$MEDIA_TAR" "$MEDIA_TAR.corrupt"
     fail "media archive holds $TAR_FILES file(s), manifest lists $MEDIA_FILES"
+  fi
+
+  # THE PROOF, and the reason the two checks above are not it. A listable archive with the
+  # right number of entries says nothing about content: a transfer that corrupted bytes
+  # inside a recording, or truncated one while keeping its entry, passes both. This checks
+  # the transferred BYTES against the manifest taken at the source, in a temporary tree
+  # that the verifier removes on every exit path. Nothing in this set and nothing in
+  # production is written by it.
+  #
+  # Before the prune below, deliberately: pruning on the strength of an unverified archive
+  # is how the last good copy gets deleted.
+  if ! "$SCRIPT_DIR/verify-media-archive.sh" "$MEDIA_TAR" "$MEDIA_MANIFEST"; then
+    # Preserved under a name that cannot be mistaken for a backup, like a dump that
+    # pg_restore could not read. The bytes are kept: they are evidence about what the
+    # transfer did, and the manifest beside them is what proves it.
+    mv "$MEDIA_TAR" "$MEDIA_TAR.corrupt"
+    fail "media archive does not match its source manifest - quarantined as $MEDIA_TAR.corrupt"
   fi
 fi
 

@@ -57,6 +57,7 @@ const required = [
   "scripts/check-client-secrets.mjs",
   "scripts/check-integration-tests-ran.mjs",
   "scripts/backup-mc-legends.sh",
+  "scripts/verify-media-archive.sh",
   "docs/deploy/vps-mc-legends.md",
   "docs/ops/MCL-48-backup-restore.md",
   "docs/ops/MCL-49-audio-storage.md",
