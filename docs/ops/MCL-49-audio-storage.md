@@ -197,6 +197,18 @@ Both streams are required, and both are taken by `scripts/backup-mc-legends.sh`:
    is the source-side truth captured before transfer and the thing that makes a restore
    drill provable.
 
+The transferred archive is checked **by digest** against that manifest before the backup
+reports success or prunes anything — `scripts/verify-media-archive.sh`, called from the
+backup script and run on every `npm run test` by
+`tests/unit/verify-media-archive.test.ts`. Until 2026-08-21 the archive was only listed and
+counted, which a transfer that corrupted bytes inside a recording survives (PR #31 review
+finding F2).
+
+Once audio persistence is live in production, set `MCL_BACKUP_REQUIRE_MEDIA=1` in the
+backup job, so a missing media directory fails the run instead of producing a green
+database-only set. The exact point at which that stops being optional, with the two
+commands that decide it, is `docs/ops/MCL-48-backup-restore.md` §6.1.1.
+
 The drill, including the cross-check that every audio row's object key exists in the
 restored media tree, is in `docs/ops/MCL-48-backup-restore.md`.
 

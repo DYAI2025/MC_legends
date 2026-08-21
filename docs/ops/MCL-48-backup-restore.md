@@ -453,9 +453,18 @@ Every drill gets a row. A drill that is not written down did not happen.
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-08-14T19:53:39Z | `mcl-20260814T195339Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | n/a — no media stream yet | n/a | **PASS** | Claude Code / benjaminpoersch |
 | 2026-08-21T19:54:23Z | `20260821T195423Z/mcl-20260821T195423Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | 1 (seeded drill artefact) | **PASS** (`shasum -a 256 -c`, exit 0) | **PASS** | Claude Code / benjaminpoersch |
+| 2026-08-21T21:36Z | n/a — archive verification only, no restore | n/a | n/a | n/a | n/a | 1 (the set above, re-checked) | **PASS** (`scripts/verify-media-archive.sh`, exit 0, `verified 1 file(s)`) | **PASS** | Claude Code / benjaminpoersch |
 
 The criterion in Jira MCL-48 is "validated at least once". The first row is that once. The
 second is MCL-49's: the same criterion for the media stream, which `pg_dump` does not cover.
+
+The third row is not a restore drill and does not claim to be one. It records the first run
+of `scripts/verify-media-archive.sh` (§6.1) against a real, already-pulled set — the same
+`20260821T195423Z` archive and the same manifest `sha256sum` wrote on the VPS. What it
+proves is narrow and worth stating precisely: the manifest format crosses the
+Linux-to-macOS boundary intact, the digest check passes on bytes that actually travelled,
+the archive is byte-identical before and after (`4e6a7525…`), and no verification tree is
+left behind. It does **not** re-prove the restore; rows one and two are that.
 
 ### First real drill — 2026-08-14
 
@@ -532,17 +541,67 @@ Four properties worth stating, because each one is a decision:
 
 - **The manifest is computed on the VPS**, not here after the transfer. A manifest computed
   on the copy would agree with a corrupted copy — it would be describing the corruption.
-- **The archive is counted against the manifest** at backup time. A mismatch quarantines
-  the archive as `.corrupt` and fails the run, while the source still exists to re-read.
+- **The archive is counted AND digest-checked against the manifest** at backup time.
+  `scripts/verify-media-archive.sh` extracts the downloaded archive into a temporary tree,
+  runs the manifest check there, and cross-checks the file count in both directions —
+  `sha256sum -c` proves every manifest line has a file, never that every file has a line.
+  A mismatch quarantines the archive as `.corrupt` and fails the run, while the source
+  still exists to re-read. Nothing in the set and nothing in production is written by that
+  verification, and the temporary tree is removed on every exit path.
 - **An absent media directory is reported, not crashed on and not silently treated as
   "no files".** "The directory is not there" and "the directory is empty" have different
-  fixes, and only the second is normal after uploads have started.
+  fixes, and only the second is normal after uploads have started. Once audio persistence
+  is live, `MCL_BACKUP_REQUIRE_MEDIA=1` turns the first into a failed run — see §6.1.1.
 - **Pruning happens only after a new set is taken and verified**, so there is never a
-  window with no good copy.
+  window with no good copy. "Verified" now means the digest check above; until 2026-08-21
+  it meant a listing and a count, which a corrupted transfer survives.
 
 Same pull-not-push reasoning as §1, unchanged: the VPS holds no credential for this
 machine and opens no inbound port, so a compromised VPS cannot reach or delete these
 copies.
+
+`scripts/verify-media-archive.sh` can also be run by hand against any pulled set, which is
+the cheapest way to answer "is this backup still good" without a restore:
+
+```bash
+SET=~/Backups/mc-legends/20260821T195423Z
+./scripts/verify-media-archive.sh "$SET"/media-*.tar "$SET"/media-*.sha256
+```
+
+It is a separate script rather than more lines inside the backup script for one reason:
+`backup-mc-legends.sh` shells to `ssh`, `pg_dump` and `pg_restore`, so it can never run in
+CI or on a machine with no VPS credential. The verifier can, and
+`tests/unit/verify-media-archive.test.ts` runs it on every `npm run test` — including the
+case that matters, an archive whose entry is present and whose count matches but whose
+bytes are not the bytes the source hashed. Both scripts are also checked by `shellcheck` in
+CI, because eslint does not read shell.
+
+#### 6.1.1 `MCL_BACKUP_REQUIRE_MEDIA` — when it stops being optional
+
+Unset (or any value other than the literal `1`), the script behaves exactly as it did
+before audio: a missing media directory on the VPS produces a warning, a database-only set
+and exit 0. That is correct while no client posts a recording.
+
+**It becomes mandatory the moment audio persistence is live in production.** Both of these
+being true is the test, and neither is a matter of opinion:
+
+```bash
+# On the VPS.
+grep -q '^AVALORIA_MEDIA_DIR=' /opt/mc-legends/app.env && echo "media dir configured"
+docker exec mc-legends psql "$DATABASE_URL" -Atc \
+  "select count(*) from submission_inbox where kind='audio'"     # > 0
+```
+
+From the first audio row onward, a missing media directory is data loss rather than a
+pre-audio state, and a backup that exits 0 without a media stream is a lie nobody will
+check until the day they need the recordings. Set `MCL_BACKUP_REQUIRE_MEDIA=1` in the
+launchd job's environment at that point.
+
+What it deliberately does **not** cover: a media directory that exists and is **empty**.
+That is the legitimate state between configuring `AVALORIA_MEDIA_DIR` and the first upload,
+and failing on it would make the backup start failing the day the directory is created.
+"The directory is not there" and "the directory is empty" have different fixes, which is
+the same distinction the script has drawn since it was written.
 
 ### 6.2 The drill — both streams, and the cross-check that ties them together
 
