@@ -525,9 +525,12 @@ Stated so nobody assumes coverage that does not exist.
   invalidated when they are regenerated. Keep them in a password manager. Do **not** add
   the file to this backup: it would put the database password in the same place as the
   database, which is exactly what the "no secret travels" property above avoids.
-- **Audio artefacts (MCL-49).** Not yet in existence, and `pg_dump` of `mcl` will not
-  cover blobs stored on the filesystem. When MCL-49 lands, this document needs a second
-  stream for those files, and §12 of `docs/deploy/vps-mc-legends.md` (disk at 78 %) needs
+- ~~**Audio artefacts (MCL-49).** Not yet in existence, and `pg_dump` of `mcl` will not
+  cover blobs stored on the filesystem.~~ **COVERED since 2026-08-21** — see §6. The media
+  stream is a second artefact in the same backup set, taken by
+  `scripts/backup-mc-legends.sh`, and the drill in §6.2 cross-checks it against the
+  database restore. What follows is the original note, kept because its second half is
+  still live: §12 of `docs/deploy/vps-mc-legends.md` (disk, re-measured 75 %) needs
   revisiting for both the source volume and the backup destination.
 - **Every other service on the VPS.** `gbrain`, `openwa-postgres`, `whatsapp-brain`,
   `lpam-frontend-1`, `qdrant`, nginx configuration, Let's Encrypt certificates. All still

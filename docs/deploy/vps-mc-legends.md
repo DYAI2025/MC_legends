@@ -231,6 +231,75 @@ ls -l /opt/mc-legends/app.env    # expect -rw------- root root
 and non-blank selects `PostgresSubmissionInboxStore`; unset or blank selects the file
 store. That is deliberate, and it is the rollback path in §9.
 
+### 5.1 Private media storage (MCL-49) — two things this host does not do yet
+
+Both of these are **required before the first recording is accepted in production**.
+Neither is urgent today only because no client sends audio yet: the browser send path is
+MCL-30B, so the audio route currently has no traffic. Full reasoning in
+`docs/ops/MCL-49-audio-storage.md`.
+
+**(a) The media directory, on the bind mount and not in the container layer.**
+
+Measured 2026-08-21: `docker inspect mc-legends` lists `AVALORIA_INBOX_DIR` and **not**
+`AVALORIA_MEDIA_DIR`, so the app would fall back to `.data/media` inside the container's
+writable layer — which a Coolify redeploy replaces. That is the exact failure MCL-49's
+AC2 and AC9 forbid, and it would be silent and irreversible.
+
+The mount itself is already right (`/opt/mc-legends/data -> /data`), so this is a
+directory and one line of `app.env`:
+
+```bash
+install -d -m 0700 -o root -g root /opt/mc-legends/data/media
+stat -c '%a %U:%G' /opt/mc-legends/data/media     # expect: 700 root:root
+```
+
+```bash
+umask 077
+${EDITOR:-nano} /opt/mc-legends/app.env
+```
+
+Add:
+
+```
+AVALORIA_MEDIA_DIR=/data/media
+```
+
+The path is the one the **container** sees. `0700` on the directory is an operator
+obligation rather than something the code guarantees: the adapter creates directories
+`0700` and files `0600` explicitly, but `mkdir` applies a mode only to directories it
+creates, so a root that already exists keeps whatever mode it has.
+
+Verify after the restart in §8 — this is the field that tells you which volume is in use:
+
+```bash
+curl -sS -k https://127.0.0.1:8443/api/health/ready | tee /dev/stderr | grep -q '"storage":"ok"'
+docker exec mc-legends sh -c 'ls -ld /data/media'
+```
+
+**(b) `client_max_body_size` on both vhosts.**
+
+Measured 2026-08-21: `grep -rn client_max_body_size /etc/nginx/` matched
+`media.dyai.cloud` and `coupletimer.site` and **neither** mc-legends vhost. nginx's
+default is **1 MiB**, so a recording over 1 MiB is refused by the proxy with `413` before
+the application sees it — the app's own 8 MiB cap, its MIME allowlist and its child-facing
+error vocabulary never run, and the child sees a failure the app cannot explain because it
+was never asked.
+
+Add to the `server` block of **both** `/etc/nginx/sites-available/mc-legends` and
+`/etc/nginx/sites-available/mclegends.dyai.cloud`:
+
+```
+client_max_body_size 12M;
+```
+
+12M, not 8M: the app's ceiling is 8 MiB of **body**, and the proxy limit applies to the
+framed request. A proxy limit at or below the app's turns a legitimate recording into an
+error the app never sees.
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
 ---
 
 ## 6. Build the new image and run the migrations
@@ -612,16 +681,28 @@ a server default other than ISO is survivable — but only as long as §11.1 sta
 
 ## 12. Disk
 
-`/` is 96 G with **22 G free (78 % used)** as observed on 2026-08-13. That is ample for
-this table: text rows capped at 4000 characters, a household's worth of answers, plus WAL.
+Observed 2026-08-13: 96 G with **22 G free (78 % used)**.
+Re-measured **2026-08-21**:
 
-It is **not** ample for what comes next. MCL-49 adds audio artefacts, and unless they are
-placed elsewhere they land on this same volume. Revisit capacity — and the backup sizing
-in `docs/ops/MCL-48-backup-restore.md` — **before** starting MCL-49, not after the first
-upload fails.
+```
+$ df -h /
+/dev/sda1        96G   71G   25G  75% /
+```
+
+25 G free — slightly better than the 2026-08-13 reading, not worse. Ample for the table
+itself: text rows capped at 4000 characters, a household's worth of answers, plus WAL.
+
+MCL-49's recordings land on this **same volume**, under `/opt/mc-legends/data/media`
+(§5.1). At the 8 MiB ceiling 25 G is on the order of 3 200 worst-case recordings, which a
+family MVP will not approach — but this volume also carries the PostgreSQL data directory
+and every other service on the host, so the budget is not this feature's alone. Re-read
+`df -h /` before enabling uploads and again after the first month, and keep the backup
+sizing in `docs/ops/MCL-48-backup-restore.md` in view: the media stream copies these bytes
+off the host in full, with no deduplication between sets.
 
 ```bash
 df -h /
+du -sh /opt/mc-legends/data/media 2>/dev/null || echo "no media stored yet"
 ```
 
 ---
