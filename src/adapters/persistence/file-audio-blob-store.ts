@@ -43,7 +43,28 @@ const OBJECT_KEY = new RegExp(
  * Nothing serves this directory over HTTP. Playback goes through an authorized route that
  * reads through this adapter, so there is no public media URL and no static path that
  * could execute what it finds.
+ *
+ * "Private" is also a filesystem fact here, not only a routing one. Every mode below is
+ * stated explicitly rather than left to the process umask - measured before they were:
+ * under the default umask of 022 a stored recording landed 0644 and its shard 0755,
+ * because `open` defaults to 0666 and `mkdir` to 0777. A umask is a property of whoever
+ * started the process, so on a host where the media directory is a bind mount that other
+ * containers or another user can traverse, relying on it makes the privacy of a child's
+ * recording depend on how somebody launched the app.
  */
+
+/** Owner read/write only. Nothing else has any business reading a child's recording. */
+const BLOB_MODE = 0o600;
+
+/**
+ * Owner only, and the execute bit is the one that matters: without it the shard cannot be
+ * traversed at all, so it is what actually stops another user from reaching a blob.
+ *
+ * `mkdir` applies a mode only to directories it CREATES. An existing media root keeps
+ * whatever mode it already has, which is why the deployment runbook states 0700 on that
+ * directory as an operator obligation rather than as something this class guarantees.
+ */
+const DIRECTORY_MODE = 0o700;
 export class FileAudioBlobStore implements AudioBlobStore {
   constructor(private readonly directory: string) {}
 
@@ -58,7 +79,7 @@ export class FileAudioBlobStore implements AudioBlobStore {
       return;
     }
 
-    await mkdir(dirname(path), { recursive: true });
+    await mkdir(dirname(path), { recursive: true, mode: DIRECTORY_MODE });
 
     // Written to a temporary name in the SAME directory, then renamed. rename(2) is
     // atomic within a filesystem, so a reader either sees no file or sees the whole one -
@@ -71,7 +92,7 @@ export class FileAudioBlobStore implements AudioBlobStore {
     const temporary = `${path}.${randomUUID()}.part`;
 
     try {
-      const handle = await open(temporary, "wx");
+      const handle = await open(temporary, "wx", BLOB_MODE);
       try {
         await handle.write(bytes);
         // Before the rename, not after: a rename that lands in the directory entry while
@@ -111,13 +132,13 @@ export class FileAudioBlobStore implements AudioBlobStore {
   }
 
   async checkWritable(): Promise<void> {
-    await mkdir(this.directory, { recursive: true });
+    await mkdir(this.directory, { recursive: true, mode: DIRECTORY_MODE });
 
     // A real write and a real removal. `stat` would pass on a read-only remount, on a
     // full disk, and on a volume that failed to mount and left an empty directory behind -
     // all three of which fail every submission while readiness reports storage is fine.
     const probe = join(this.directory, `.writable-${randomUUID()}`);
-    const handle = await open(probe, "wx");
+    const handle = await open(probe, "wx", BLOB_MODE);
     try {
       await handle.write(new Uint8Array([0]));
     } finally {
