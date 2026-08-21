@@ -19,11 +19,15 @@ Where they now live, so a reviewer can check them rather than take this file's w
   `submission_inbox_media_extension_known` in `db/migrations/0002_submission_audio.sql`.
   The declared `Content-Type` must equal what the bytes' own container says they are — an
   allowlist checked only against a header is an allowlist the client opts into.
-- **Size limit** — 8 MiB, enforced in three places that must agree:
-  `AVALORIA_AUDIO_MAX_BYTES`, the upload route's streaming cap, and
-  `submission_inbox_media_size_bounded`. Documented in
+- **Size limit** — 8 MiB, and it is a **ceiling rather than a default**. `MAX_AUDIO_BYTES`
+  in `src/domain/media/audio-artifact.ts` is the product maximum;
+  `AVALORIA_AUDIO_MAX_BYTES` can only lower what the route accepts, because the
+  composition root clamps it with `Math.min` and logs that it did. The domain refuses an
+  oversized artifact as a backstop, and both inbox adapters refuse the record —
+  `submission_inbox_media_size_bounded` in PostgreSQL, an equivalent check in the file
+  rollback store, proven together by the shared store contract. Documented in
   `docs/ops/MCL-49-audio-storage.md` §9, which also records that the reverse proxy's
-  `client_max_body_size` is part of the same agreement.
+  `client_max_body_size` is part of the same agreement and must be higher.
 - **No executable web content** — the stored extension comes from the domain table and
   never from a client filename; nothing serves the media directory over HTTP; playback
   goes through an admin-gated route that answers with `nosniff`, a `default-src 'none';

@@ -202,18 +202,31 @@ restored media tree, is in `docs/ops/MCL-48-backup-restore.md`.
 
 ---
 
-## 9. The size cap: 8 MiB, in three places that must agree
+## 9. The size cap: 8 MiB, a ceiling and not a default
 
 `8388608` bytes, decided 2026-08-21.
 
 | Where | What enforces it |
 |---|---|
-| `AVALORIA_AUDIO_MAX_BYTES` | `audioMaxBytes()` in the composition root; the route refuses from `content-length` first and caps the stream second |
+| `MAX_AUDIO_BYTES` (`src/domain/media/audio-artifact.ts`) | The product maximum. `describeAudioArtifact` refuses anything larger — called **before** the blob is written, so the backstop cannot leave an orphan file |
+| `AVALORIA_AUDIO_MAX_BYTES` | `audioMaxBytes()` clamps it with `Math.min` and warns once per process; the route refuses from `content-length` first and caps the stream second |
 | Migration `0002` | `submission_inbox_media_size_bounded` — survives a redeploy with a stale config |
+| `FileSubmissionInboxStore` | The same refusal in the MCL-48 rollback path, where no CHECK constraint exists. Both adapters are proven by the shared store contract |
 | The reverse proxy | `client_max_body_size`, which must be **higher** to allow for framing overhead |
 
-Lowering the app's value needs no migration. Raising it past the database's ceiling is
-refused by the CHECK, which is the intended order: widening is a migration.
+**Lowering** the configured value works and needs no migration. **Raising** it does
+nothing: the composition root clamps to `8388608` and logs one line saying so. Widening the
+product maximum is a schema migration first and a code change second, in that order.
+
+> **Repaired 2026-08-21 (PR #31 review finding F1).** `audioMaxBytes()` used to treat
+> `8388608` as a *default* and returned any positive configured value. A host that set
+> `33554432` widened the upload route past what the database allows, and the two modes then
+> failed differently for one request: PostgreSQL wrote the blob first — the correct
+> ordering, and exactly why the limit has to be right before that write — then had the row
+> refused by the CHECK, leaving a recording on disk that is deliberately never deleted
+> after a database failure. The file rollback store refused nothing at all and answered
+> with a receipt. Pinned by `tests/unit/audio-max-bytes.test.ts` and by the oversize case
+> in `tests/unit/submission-inbox-store-contract.ts`, which runs against both adapters.
 
 > **GAP, measured 2026-08-21 — neither mc-legends vhost sets `client_max_body_size`.**
 > `grep -rn client_max_body_size /etc/nginx/` matched `media.dyai.cloud` and
