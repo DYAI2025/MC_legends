@@ -240,6 +240,7 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
  * test set them before the first request.
  */
 let protectedRouteLimiter: RateLimiter | null = null;
+let audioInboxLimiter: RateLimiter | null = null;
 let familySessionLimiter: RateLimiter | null = null;
 let globalFamilySessionLimiter: RateLimiter | null = null;
 let adminRouteLimiter: RateLimiter | null = null;
@@ -252,6 +253,27 @@ export function createProtectedRouteRateLimiter(): RateLimiter {
     windowMs: positiveInteger(process.env.AVALORIA_INBOX_RATE_WINDOW_MS, 60_000),
   });
   return protectedRouteLimiter;
+}
+
+/**
+ * The audio upload's own bucket, separate from the text inbox's (MCL-49).
+ *
+ * Lower than the text inbox's 30, and the reason is the resource rather than the verb:
+ * one text submission is at most 16 KiB, one recording is up to 8 MiB. At 30 per minute
+ * per caller the text route can cost this server half a megabyte; the audio route at the
+ * same allowance could cost it 240 MiB of buffering and disk, per address, per minute.
+ * The scarce thing here is bytes, so the count that bounds them is a different number.
+ *
+ * A separate bucket rather than a shared one for the same reason the admin read has its
+ * own: a child submitting recordings must not be able to exhaust the allowance for typed
+ * answers, nor the other way round.
+ */
+export function createAudioInboxRateLimiter(): RateLimiter {
+  audioInboxLimiter ??= new InMemoryRateLimiter({
+    limit: positiveInteger(process.env.AVALORIA_AUDIO_RATE_LIMIT, 10),
+    windowMs: positiveInteger(process.env.AVALORIA_AUDIO_RATE_WINDOW_MS, 60_000),
+  });
+  return audioInboxLimiter;
 }
 
 export function createFamilySessionRateLimiter(): RateLimiter {
@@ -336,6 +358,10 @@ export function createGlobalAdminSessionRateLimiter(): RateLimiter {
 
 export function resetRateLimitersForTest(): void {
   protectedRouteLimiter = null;
+  // A limiter missing from this list makes every later test in the process inherit the
+  // previous one's count - which shows up as a rate-limit case that passes alone and a
+  // 429 in a test that was not about rate limiting at all.
+  audioInboxLimiter = null;
   familySessionLimiter = null;
   globalFamilySessionLimiter = null;
   adminRouteLimiter = null;
