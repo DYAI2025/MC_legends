@@ -449,11 +449,13 @@ being tested is the pipeline, not one file.
 
 Every drill gets a row. A drill that is not written down did not happen.
 
-| Date (UTC) | Dump file | Dump size | Rows restored | Rows at source | `schema_migrations` restored | Match | Run by |
-|---|---|---|---|---|---|---|---|
-| 2026-08-14T19:53:39Z | `mcl-20260814T195339Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | **PASS** | Claude Code / benjaminpoersch |
+| Date (UTC) | Dump file | Dump size | Rows restored | Rows at source | `schema_migrations` restored | Media files | Manifest verified | Match | Run by |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-08-14T19:53:39Z | `mcl-20260814T195339Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | n/a — no media stream yet | n/a | **PASS** | Claude Code / benjaminpoersch |
+| 2026-08-21T19:54:23Z | `20260821T195423Z/mcl-20260821T195423Z.dump` | 4942 bytes | 1 | 1 | `0001_submission_inbox` | 1 (seeded drill artefact) | **PASS** (`shasum -a 256 -c`, exit 0) | **PASS** | Claude Code / benjaminpoersch |
 
-The criterion in Jira MCL-48 is "validated at least once". The row above is that once.
+The criterion in Jira MCL-48 is "validated at least once". The first row is that once. The
+second is MCL-49's: the same criterion for the media stream, which `pg_dump` does not cover.
 
 ### First real drill — 2026-08-14
 
@@ -496,6 +498,131 @@ on real production infrastructure with the real schema; it has not yet been exer
 against a database holding real family text. That is a difference in the data, not in the
 mechanism, and the mechanism is what the criterion asks for. It is recorded here rather
 than glossed, because "restored 1 row" reads like more than it is.
+
+---
+
+## 6. The media stream (MCL-49)
+
+`pg_dump` covers rows. It does not cover the private recordings under
+`/opt/mc-legends/data/media`, and a database restore whose object keys point at nothing is
+not a restore. Both streams are one backup **set**, and both are taken by one committed
+script.
+
+### 6.1 The script
+
+`scripts/backup-mc-legends.sh`, in the repository — deliberately a file rather than a
+heredoc in this document. MCL-48's pull script lived only inside §1 for its first day,
+which is how a complete script in a document turns out not to be a script on a disk; this
+one is reviewed, diffed and listed by `npm run check:foundation`.
+
+```bash
+./scripts/backup-mc-legends.sh [destination-directory]     # default ~/Backups/mc-legends
+```
+
+One timestamped directory per run, holding four files:
+
+| File | What it is |
+|---|---|
+| `mcl-<stamp>.dump` | `pg_dump --format=custom --no-owner` of `mcl` |
+| `mcl-<stamp>.dump.toc` | `pg_restore --list` of that dump, written at backup time |
+| `media-<stamp>.tar` | `tar` of the media directory, relative paths |
+| `media-<stamp>.sha256` | SHA-256 manifest **generated on the VPS**, before transfer |
+
+Four properties worth stating, because each one is a decision:
+
+- **The manifest is computed on the VPS**, not here after the transfer. A manifest computed
+  on the copy would agree with a corrupted copy — it would be describing the corruption.
+- **The archive is counted against the manifest** at backup time. A mismatch quarantines
+  the archive as `.corrupt` and fails the run, while the source still exists to re-read.
+- **An absent media directory is reported, not crashed on and not silently treated as
+  "no files".** "The directory is not there" and "the directory is empty" have different
+  fixes, and only the second is normal after uploads have started.
+- **Pruning happens only after a new set is taken and verified**, so there is never a
+  window with no good copy.
+
+Same pull-not-push reasoning as §1, unchanged: the VPS holds no credential for this
+machine and opens no inbound port, so a compromised VPS cannot reach or delete these
+copies.
+
+### 6.2 The drill — both streams, and the cross-check that ties them together
+
+Restore into scratch locations. **Never over `/opt/mc-legends/data/media` and never over
+`mcl`.** The port note in §1 applies unchanged: the 17 cluster runs on 5433 for the
+duration and is stopped afterwards.
+
+```bash
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+export PGPORT=5433
+SET=~/Backups/mc-legends/<stamp>
+DRILL=/tmp/mcl-restore-drill
+
+# 1. The media stream, into a scratch directory
+mkdir -p "$DRILL" && tar -xf "$SET"/media-*.tar -C "$DRILL"
+
+# 2. THE PROOF: recompute here, compare against the manifest taken at the source
+cd "$DRILL" && shasum -a 256 -c "$SET"/media-*.sha256
+
+# 3. The database, into a scratch database
+pg_ctl -D /opt/homebrew/var/postgresql@17 -o "-p 5433" -l /tmp/pg17.log start
+createdb mcl_drill_$(date -u +%Y%m%d)
+pg_restore --dbname=mcl_drill_$(date -u +%Y%m%d) --no-owner --exit-on-error "$SET"/mcl-*.dump
+
+# 4. THE OTHER PROOF: every audio row's object key must exist in the restored media tree
+psql -d mcl_drill_$(date -u +%Y%m%d) -Atc \
+  "select media_object_key from submission_inbox where kind='audio'" \
+| while read -r k; do test -f "$DRILL/$k" || echo "MISSING $k"; done
+
+# 5. Clean up. Do not leave a copy of family answers lying around.
+dropdb mcl_drill_$(date -u +%Y%m%d)
+rm -rf "$DRILL"
+pg_ctl -D /opt/homebrew/var/postgresql@17 stop
+```
+
+Step 4 is what makes the two files one recoverability story rather than two. Step 2 alone
+proves the bytes survived; step 4 proves the database still knows where they are.
+
+### 6.3 First media drill — 2026-08-21
+
+- **Set:** `~/Backups/mc-legends/20260821T195423Z`, produced by
+  `./scripts/backup-mc-legends.sh` against `root@srv1308064.hstgr.cloud`.
+- **Database stream:** `mcl-20260821T195423Z.dump`, 4942 bytes, 24 TOC entries.
+  `pg_restore --exit-on-error` → **exit 0**. Restored `submission_inbox` count **1**;
+  live source count **1**; `schema_migrations` `0001_submission_inbox` on both sides —
+  **exact match**. **PASS**
+- **Media stream:** `media-20260821T195423Z.tar`, 10240 bytes, **1 file**;
+  `media-20260821T195423Z.sha256`, **1 line**. Verbatim verification output:
+
+  ```
+  ./00/0009eaa3a504e5fade9941713aafdab34fbb5c83a43a09a84b7add4a7fcbfbe9.webm: OK
+  ```
+
+  `shasum -a 256 -c` **exit 0**. **PASS**
+- **Cross-check (step 4):** printed `PRESENT 00/0009…9.webm`, **0 missing object keys**,
+  and the restored file's recomputed digest equalled the `media_sha256` the row claimed.
+  **PASS**
+- **Cleanup:** scratch database dropped, restored media tree removed, PG17 stopped
+  (`pg_isready -p 5433` → no response), PG15 on 5432 verified still accepting. **PASS**
+
+**What this drill did and did not prove — read this before quoting it.**
+
+- **The single media file was SEEDED for the drill**, by hand, on 2026-08-21. It is a
+  62-byte text file stored under a real content-addressed key
+  (`00/0009eaa3…9.webm`, the SHA-256 of its own bytes), **not a child's recording**. No
+  recording has ever been stored in production: the browser send path is MCL-30B and
+  nothing posts to the audio route yet. The artefact was **removed after the drill**
+  (`find /opt/mc-legends/data/media -type f | wc -l` → `0`), and the directory was kept
+  because creating it `0700 root:root` is the deployment step in
+  `docs/deploy/vps-mc-legends.md` §5.1 rather than drill litter.
+- **Production `mcl` is still at migration `0001`.** Migration `0002` — the one that adds
+  the five media columns — has not been deployed. The cross-check in step 4 therefore
+  could not run against the restored production schema (`ERROR: column
+  "media_object_key" does not exist`), so it was run the way a real recovery would: `0002`
+  was applied to the **scratch** restore, one audio row referencing the restored blob was
+  inserted, and the check was run against that. The procedure is proven; it has not yet
+  been run against a production database that carries audio rows.
+- Therefore **AC10 is proven for the mechanism and not for real data**. That is a
+  difference in the data and not in the pipeline, and it is written down here rather than
+  glossed, because "1 media file restored" reads like more than it is.
 
 ---
 
