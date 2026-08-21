@@ -12,6 +12,7 @@ import type { InboxPage } from "@/application/submissions/submission-inbox-reade
 import { resetRateLimitersForTest } from "@/composition/server";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
 import { asTextEntry } from "../support/text-submission-shape";
+import { asAudioEntry } from "../support/audio-submission-shape";
 
 const ENDPOINT = "http://localhost/api/admin/inbox/submissions";
 const ADMIN_CODE = "ein-eigener-admin-code-nur-fuer-erwachsene";
@@ -64,6 +65,23 @@ async function seed(): Promise<void> {
     receiptId: "receipt-2",
     originalText: "hinter dem wasserfall",
   });
+  // A recording, so `?kind=` is a filter with something on both sides of it rather than
+  // a parameter that always matches everything (MCL-49).
+  await store.appendIfAbsent({
+    kind: "audio",
+    submissionId: "sub-3",
+    questionId: "companion-animal",
+    createdAt: "2026-08-13T10:15:00.000Z",
+    receivedAt: "2026-08-13T10:30:00.000Z",
+    receiptId: "receipt-3",
+    audio: {
+      objectKey: "cd/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.webm",
+      mimeType: "audio/webm",
+      extension: "webm",
+      sizeBytes: 128_000,
+      sha256: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    },
+  });
 }
 
 beforeEach(async () => {
@@ -95,8 +113,12 @@ describe("GET /api/admin/inbox/submissions", () => {
 
     expect(response.status).toBe(200);
     const page = (await response.json()) as InboxPage;
-    expect(page.entries.map((entry) => entry.submissionId)).toEqual(["sub-2", "sub-1"]);
-    expect(page.total).toBe(2);
+    expect(page.entries.map((entry) => entry.submissionId)).toEqual([
+      "sub-3",
+      "sub-2",
+      "sub-1",
+    ]);
+    expect(page.total).toBe(3);
   });
 
   it("carries the original text unchanged and the receipt alongside it", async () => {
@@ -153,8 +175,33 @@ describe("GET /api/admin/inbox/submissions", () => {
   it("filters by status and by kind", async () => {
     expect(
       ((await (await GET(get("?status=RECEIVED"))).json()) as InboxPage).total,
-    ).toBe(2);
+    ).toBe(3);
     expect(((await (await GET(get("?kind=text"))).json()) as InboxPage).total).toBe(2);
+  });
+
+  it("filters for recordings, which it used to refuse outright", async () => {
+    // `?kind=audio` was answered 400 until MCL-49 widened KNOWN_KINDS: the upload route
+    // was accepting recordings that the admin had no way to ask for.
+    const response = await GET(get("?kind=audio"));
+
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as InboxPage;
+    expect(page.entries.map((entry) => entry.submissionId)).toEqual(["sub-3"]);
+    expect(page.total).toBe(1);
+  });
+
+  it("carries a recording's media metadata and no URL to it", async () => {
+    const page = (await (await GET(get("?kind=audio"))).json()) as InboxPage;
+    const entry = asAudioEntry(page.entries[0]);
+
+    expect(entry.audio.mimeType).toBe("audio/webm");
+    expect(entry.audio.sizeBytes).toBe(128_000);
+    // The listing carries the object key as metadata and nothing that is a URL: the
+    // recording is reachable only through the separate authorized route, which the client
+    // builds from the submission id.
+    const raw = JSON.stringify(page);
+    expect(raw).not.toContain("http");
+    expect(raw).not.toContain(directory);
   });
 
   /**
@@ -164,7 +211,10 @@ describe("GET /api/admin/inbox/submissions", () => {
   it("refuses an unknown filter value instead of ignoring it", async () => {
     for (const query of [
       "?status=PROCESSED",
-      "?kind=audio",
+      // Not "audio" any more - that one is now a real filter. A kind the union has never
+      // had is what this case needs, and it is still refused rather than ignored.
+      "?kind=video",
+      "?kind=",
       "?limit=0",
       "?limit=-1",
       "?limit=1.5",

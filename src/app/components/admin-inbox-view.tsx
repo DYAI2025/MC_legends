@@ -9,11 +9,20 @@ import {
   QUESTION_FILTER_DEBOUNCE_MS,
   type AdminFilterState,
 } from "@/app/admin-inbox-query";
+import type { SubmissionKind } from "@/domain/submissions/submission";
 import type { AdminInboxResult } from "@/application/submissions/admin-inbox-client";
 import type { InboxEntry, InboxPage } from "@/application/submissions/submission-inbox-reader";
 import { createBrowserAdminInboxClient } from "@/composition/browser";
 
 const inboxClient = createBrowserAdminInboxClient();
+
+/**
+ * The kinds the filter can express, as a total list over the union.
+ *
+ * `satisfies` rather than a literal array of strings: a third submission kind is then a
+ * compile error here instead of a value the server accepts and this control cannot select.
+ */
+const KIND_OPTIONS = ["text", "audio"] as const satisfies readonly SubmissionKind[];
 
 /**
  * What an adult reads when a read fails. A total table over the non-granted outcomes,
@@ -210,7 +219,11 @@ export function AdminInboxView() {
             }
           >
             <option value="">Alle</option>
-            <option value="text">text</option>
+            {KIND_OPTIONS.map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -301,6 +314,27 @@ function AdminInboxCard({ entry }: { entry: InboxEntry }) {
       ) : (
         <section className="admin-original" aria-label="Originalaufnahme">
           <h3>Originalaufnahme</h3>
+          {/*
+            The recording itself, above its metadata and inside the ORIGINAL region: a
+            spoken answer's original is the audio, and the numbers below it are what the
+            system recorded about it.
+
+            `src` is a route path and never an object key. The listing carries no URL and
+            no filesystem path - this is built from the submission id, and the route looks
+            the key up behind the admin gate - so there is no value on this screen that
+            could become a public media link if the page leaked.
+
+            `preload="none"` because opening the inbox must not fetch every recording it
+            lists: at 8 MiB each that is the difference between a page load and a download.
+          */}
+          <audio
+            className="admin-original-player"
+            controls
+            preload="none"
+            src={`/api/admin/inbox/submissions/${encodeURIComponent(entry.submissionId)}/audio`}
+          >
+            Dieser Browser kann die Aufnahme nicht abspielen.
+          </audio>
           <dl className="admin-original-audio">
             <dt>Format</dt>
             <dd>{entry.audio.mimeType}</dd>

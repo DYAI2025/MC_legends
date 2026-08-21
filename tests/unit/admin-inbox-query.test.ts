@@ -19,6 +19,14 @@ describe("buildInboxQuery", () => {
     ).toEqual({ status: "RECEIVED", kind: "text", questionId: "hidden-door" });
   });
 
+  it("carries a recording filter through as well", () => {
+    // The state used to be typed `"" | "text"`, so this filter could not be expressed at
+    // all - the control had one option and the route refused the other value anyway.
+    expect(buildInboxQuery({ status: "", kind: "audio", questionId: "" })).toEqual({
+      kind: "audio",
+    });
+  });
+
   it("treats a blank or whitespace question as no filter rather than as an empty one", () => {
     // The route refuses a blank questionId with 400. A user who cleared the box asked
     // for "all questions", not for an error.

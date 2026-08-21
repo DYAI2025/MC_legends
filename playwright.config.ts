@@ -20,6 +20,12 @@ const familyServerEnvironment = {
   AVALORIA_SESSION_RATE_LIMIT: "500",
   AVALORIA_SESSION_GLOBAL_RATE_LIMIT: "500",
   AVALORIA_INBOX_RATE_LIMIT: "500",
+  // MCL-49. The audio bucket defaults to 10/minute - deliberately tighter than the text
+  // inbox's 30, because the resource it protects is disk rather than request count. Every
+  // spec that uploads a recording runs from one address in parallel, so the production
+  // value would fail tests for a reason that has nothing to do with what they check. The
+  // brake itself is proven in tests/unit/audio-inbox-route.test.ts.
+  AVALORIA_AUDIO_RATE_LIMIT: "500",
   AVALORIA_ADMIN_RATE_LIMIT: "500",
   AVALORIA_ADMIN_SESSION_RATE_LIMIT: "500",
   AVALORIA_ADMIN_SESSION_GLOBAL_RATE_LIMIT: "500",

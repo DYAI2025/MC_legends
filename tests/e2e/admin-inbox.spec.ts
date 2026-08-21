@@ -3,6 +3,7 @@ import { TEST_ADMIN_ACCESS_CODE } from "../support/admin-access-code";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
 import { signInAsAdmin, signInThroughTheAdminForm } from "../support/admin-session";
 import { signInAsFamily } from "../support/family-session";
+import { WEBM } from "../support/audio-fixtures";
 
 const ADMIN_INBOX = "/api/admin/inbox/submissions";
 
@@ -21,6 +22,29 @@ async function submitOneAnswer(
       createdAt: "2026-08-14T00:00:00.000Z",
       originalText: answerText,
     },
+  });
+  expect([200, 201]).toContain(response.status());
+}
+
+/**
+ * Uploads one recording through the real authenticated route (MCL-49).
+ *
+ * The bytes are a genuine WebM header, because the route compares the declared type
+ * against what the container actually says it is - a payload of arbitrary bytes declared
+ * as audio/webm is refused, which is the point of that check.
+ */
+async function submitOneRecording(
+  page: import("@playwright/test").Page,
+  submissionId: string,
+): Promise<void> {
+  const response = await page.request.post("/api/inbox/submissions/audio", {
+    headers: {
+      "content-type": "audio/webm",
+      "x-avaloria-submission-id": submissionId,
+      "x-avaloria-question-id": "companion-animal",
+      "x-avaloria-created-at": "2026-08-21T09:00:00.000Z",
+    },
+    data: Buffer.from(WEBM),
   });
   expect([200, 201]).toContain(response.status());
 }
@@ -395,4 +419,54 @@ test("a failed read leaves exactly one live region speaking", async ({ page }) =
   // The assertion: one region, not two. Counted rather than asserted through a strict
   // locator, so a regression reports a number instead of throwing.
   await expect(inbox.locator('[role="status"]')).toHaveCount(1);
+});
+
+test("an adult can filter for recordings and play one back", async ({ page }) => {
+  // The whole MCL-49 read path end to end: a recording goes in through the child-facing
+  // route, an adult finds it under the kind filter, and the player on the card points at
+  // the authorized route rather than at anything resembling a file.
+  await signInAsFamily(page);
+  await submitOneRecording(page, "e2e-admin-audio-playback");
+  await signInAsAdmin(page);
+
+  await page.goto("/admin");
+  await page.getByLabel("Art").selectOption("audio");
+
+  const player = page.locator(".admin-entry audio").first();
+  await expect(player).toBeVisible();
+
+  const source = (await player.getAttribute("src")) ?? "";
+  expect(source).toMatch(/^\/api\/admin\/inbox\/submissions\/[^/]+\/audio$/);
+  // No filesystem path anywhere near the browser: not the media directory, not the object
+  // key, not an absolute path of any kind. MCL-49 requires no public media URL, and a path
+  // on screen is a path in a screenshot.
+  expect(source).not.toContain(".data");
+  expect(source).not.toContain("/Users");
+  expect(source).not.toContain("..");
+
+  // Nothing is fetched until somebody presses play: at 8 MiB a recording, an inbox that
+  // preloaded every entry would be a download rather than a page load.
+  await expect(player).toHaveAttribute("preload", "none");
+
+  const bytes = await page.request.get(source);
+  expect(bytes.status()).toBe(200);
+  expect(bytes.headers()["content-type"]).toBe("audio/webm");
+  expect(bytes.headers()["x-content-type-options"]).toBe("nosniff");
+  expect((await bytes.body()).byteLength).toBe(WEBM.byteLength);
+});
+
+test("a family session cannot fetch a recording it just uploaded", async ({ page }) => {
+  // The child who sent it holds the family code and nothing else. The recording is
+  // readable only by the admin identity, and this is the case that would fail loudest if
+  // the two gates were ever merged.
+  await signInAsFamily(page);
+  await submitOneRecording(page, "e2e-family-cannot-read-audio");
+
+  const denied = await page.request.get(
+    "/api/admin/inbox/submissions/e2e-family-cannot-read-audio/audio",
+  );
+
+  expect(denied.status()).toBe(401);
+  const raw = await denied.text();
+  expect(raw).toBe('{"error":"unauthorized"}');
 });

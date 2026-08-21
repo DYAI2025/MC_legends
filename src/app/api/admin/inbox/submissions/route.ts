@@ -1,4 +1,5 @@
 import { guardAdminRequest } from "@/adapters/http/admin-request-guard";
+import type { SubmissionKind } from "@/domain/submissions/submission";
 import type {
   InboxEntryStatus,
   InboxQuery,
@@ -22,7 +23,16 @@ import {
  */
 
 const KNOWN_STATUSES = ["RECEIVED"] as const satisfies readonly InboxEntryStatus[];
-const KNOWN_KINDS = ["text"] as const;
+
+/**
+ * Both kinds since MCL-49, and `satisfies` is what keeps the list level with the union.
+ *
+ * Before the recording surface landed this was `["text"]`, so `?kind=audio` was answered
+ * 400 - the admin could not filter for the answers the upload route had just started
+ * accepting, and the refusal read as "that is not a valid filter" rather than as "this
+ * route has not been widened yet".
+ */
+const KNOWN_KINDS = ["text", "audio"] as const satisfies readonly SubmissionKind[];
 
 /** Mirrors the questionId ceiling the write route and the schema already enforce. */
 const MAX_QUESTION_ID_LENGTH = 200;
@@ -39,7 +49,7 @@ function isKnownStatus(value: string): value is InboxEntryStatus {
   return (KNOWN_STATUSES as readonly string[]).includes(value);
 }
 
-function isKnownKind(value: string): value is (typeof KNOWN_KINDS)[number] {
+function isKnownKind(value: string): value is SubmissionKind {
   return (KNOWN_KINDS as readonly string[]).includes(value);
 }
 
@@ -60,7 +70,7 @@ function refuse(status: 400 | 401 | 429 | 503, error: AdminInboxError): Response
 function readQuery(url: URL): InboxQuery | null {
   const query: {
     status?: InboxEntryStatus;
-    kind?: "text";
+    kind?: SubmissionKind;
     questionId?: string;
     limit?: number;
   } = {};
