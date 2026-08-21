@@ -1,9 +1,15 @@
+import { readServerReceipt } from "@/adapters/http/server-receipt";
 import { type SubmissionInbox, SubmissionInboxError } from "@/application/submissions/submission-inbox";
 import type { ServerReceipt, TextSubmission } from "@/domain/submissions/submission";
 
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const DEFAULT_ENDPOINT = "/api/inbox/submissions";
+/**
+ * Sized for this route's payload and no other: a JSON document the server caps at 16 KiB.
+ * The audio inbox deliberately does NOT share it - 8 MiB of recording needs a different
+ * deadline, and HttpAudioAnswerInbox states its own rather than inheriting this one.
+ */
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export type HttpSubmissionInboxOptions = Readonly<{
@@ -11,32 +17,6 @@ export type HttpSubmissionInboxOptions = Readonly<{
   fetchImplementation?: Fetch;
   timeoutMs?: number;
 }>;
-
-function nonBlankString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-/**
- * Reads a receipt out of a server answer. Anything less than an explicit
- * `acknowledged: true` plus two non-blank receipt fields is treated as a refusal,
- * so a well-meaning-but-wrong server cannot produce a fake acknowledgement.
- */
-function readReceipt(body: unknown): ServerReceipt | null {
-  if (typeof body !== "object" || body === null) {
-    return null;
-  }
-
-  const answer = body as Record<string, unknown>;
-  if (answer.acknowledged !== true) {
-    return null;
-  }
-
-  if (!nonBlankString(answer.receiptId) || !nonBlankString(answer.receivedAt)) {
-    return null;
-  }
-
-  return { receiptId: answer.receiptId.trim(), receivedAt: answer.receivedAt.trim() };
-}
 
 /**
  * Same-origin delivery adapter for the family project inbox. It carries no
@@ -91,7 +71,7 @@ export class HttpSubmissionInbox implements SubmissionInbox {
       throw new SubmissionInboxError("transport", { cause });
     }
 
-    const receipt = readReceipt(body);
+    const receipt = readServerReceipt(body);
     if (receipt === null) {
       throw new SubmissionInboxError("refused");
     }
