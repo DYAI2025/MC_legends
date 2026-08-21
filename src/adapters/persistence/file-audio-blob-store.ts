@@ -97,7 +97,7 @@ export class FileAudioBlobStore implements AudioBlobStore {
     await this.syncDirectory(dirname(path));
   }
 
-  async read(objectKey: string): Promise<Uint8Array | null> {
+  async read(objectKey: string): Promise<Uint8Array<ArrayBuffer> | null> {
     try {
       return await readFile(this.pathFor(objectKey));
     } catch (cause) {

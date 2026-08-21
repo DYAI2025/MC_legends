@@ -39,8 +39,14 @@ export interface AudioBlobStore {
    * is a real state - a restore that recovered the database but not the media, a blob
    * removed by a future retention policy - and the authorized playback route has to
    * answer 404 for it rather than 500. Every other failure throws.
+   *
+   * `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array`, which since TypeScript 5.7
+   * means `Uint8Array<ArrayBufferLike>` and is not assignable to `BodyInit` - a response
+   * body cannot be backed by a SharedArrayBuffer. The playback route hands what this
+   * returns straight to `new Response(...)`, so the narrower type is what lets it do that
+   * without copying up to 8 MiB per playback to satisfy the compiler.
    */
-  read(objectKey: string): Promise<Uint8Array | null>;
+  read(objectKey: string): Promise<Uint8Array<ArrayBuffer> | null>;
 
   /**
    * Throws unless the store can actually be written to right now.
