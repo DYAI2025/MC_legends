@@ -4,6 +4,7 @@ import {
   SubmissionPayloadError,
   type AppendOutcome,
   type InboxRecord,
+  type TextInboxRecord,
   type SubmissionInboxStore,
 } from "@/application/submissions/submission-inbox-store";
 import {
@@ -260,7 +261,7 @@ function isoFrom(row: InboxRow, column: "created_at" | "received_at"): string {
  * widening the constraint and this function fails loudly on the row it cannot type,
  * rather than handing the caller a record whose declared kind is a lie.
  */
-function kindFrom(value: string): InboxRecord["kind"] {
+function kindFrom(value: string): "text" {
   if (value === "text") {
     return value;
   }
@@ -268,7 +269,7 @@ function kindFrom(value: string): InboxRecord["kind"] {
   throw new Error(`submission_inbox.kind holds a value this adapter cannot type: ${value}`);
 }
 
-function toRecord(row: InboxRow): InboxRecord {
+function toRecord(row: InboxRow): TextInboxRecord {
   return {
     kind: kindFrom(row.kind),
     receiptId: row.receipt_id,
@@ -400,6 +401,22 @@ export class PostgresSubmissionInboxStore
   }
 
   async appendIfAbsent(record: InboxRecord): Promise<AppendOutcome> {
+    if (record.kind !== "text") {
+      // Migration 0001's `submission_inbox_kind_known` CHECK allows only 'text', so this
+      // schema physically cannot hold the record. Refused here, before any INSERT, so the
+      // failure names the cause instead of surfacing as a constraint violation nobody can
+      // read.
+      //
+      // NOT a SubmissionPayloadError: the payload is fine, the schema is behind. That
+      // distinction is what the route branches on, and calling this a payload problem would
+      // tell a child their recording is invalid when the truth is that migration 0002 has
+      // not been applied yet - exactly the window the deploy runbook documents in section
+      // 6.2, where an un-migrated database must answer 503 rather than 400.
+      throw new Error(
+        `submission_inbox cannot hold a '${record.kind}' submission until migration 0002 is applied`,
+      );
+    }
+
     const pool = poolFor(this.connectionString);
 
     const inserted = await run(pool, INSERT, [

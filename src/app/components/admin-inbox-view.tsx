@@ -280,15 +280,42 @@ function AdminInboxCard({ entry }: { entry: InboxEntry }) {
   return (
     <li className="admin-entry">
       {/*
-        The child's words, alone in their own labelled region and rendered as text.
-        `white-space: pre-wrap` in the stylesheet keeps the leading, trailing and
-        repeated spaces the store preserved byte for byte - collapsing them here would
-        display something the child did not write.
+        The child's own answer, alone in its own labelled region.
+
+        Branched on `kind` rather than reading one field that might hold either. A spoken
+        answer's original is the recording, and MCL-49 keeps the bytes out of this payload
+        entirely - so the audio branch shows what was recorded about it and reaches the
+        recording itself through the separate authorized route, never through a URL carried
+        in the listing.
       */}
-      <section className="admin-original" aria-label="Originaltext">
-        <h3>Originaltext</h3>
-        <p className="admin-original-text">{entry.originalText}</p>
-      </section>
+      {entry.kind === "text" ? (
+        <section className="admin-original" aria-label="Originaltext">
+          <h3>Originaltext</h3>
+          {/*
+            Rendered as text. `white-space: pre-wrap` in the stylesheet keeps the leading,
+            trailing and repeated spaces the store preserved byte for byte - collapsing
+            them here would display something the child did not write.
+          */}
+          <p className="admin-original-text">{entry.originalText}</p>
+        </section>
+      ) : (
+        <section className="admin-original" aria-label="Originalaufnahme">
+          <h3>Originalaufnahme</h3>
+          <dl className="admin-original-audio">
+            <dt>Format</dt>
+            <dd>{entry.audio.mimeType}</dd>
+            <dt>Groesse</dt>
+            <dd>{entry.audio.sizeBytes} Bytes</dd>
+            {/*
+              The hash, so an adult can check a stored file against what the database says
+              it should be. The object key is deliberately NOT shown: it is a filesystem
+              path, and a path on screen is a path in a screenshot.
+            */}
+            <dt>SHA-256</dt>
+            <dd className="admin-original-hash">{entry.audio.sha256}</dd>
+          </dl>
+        </section>
+      )}
 
       {/* Everything the system recorded about that text - never the text itself. */}
       <section className="admin-derived" aria-label="Systemangaben">

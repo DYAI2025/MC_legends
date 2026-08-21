@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
 import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
+import { asTextEntry } from "../support/text-submission-shape";
 
 /**
  * Seed data shared by every adapter's run of this contract.
@@ -71,7 +72,7 @@ export function describeSubmissionInboxReaderContract(
       const alpha = page.entries.find((entry) => entry.submissionId === "sub-alpha");
 
       // Byte for byte. The admin view is a reader, and a reader that trims is an editor.
-      expect(alpha?.originalText).toBe("  ein drache mit  zwei koepfen  ");
+      expect(asTextEntry(alpha).originalText).toBe("  ein drache mit  zwei koepfen  ");
     });
 
     it("carries the receipt and both instants so an ACK stays traceable", async () => {

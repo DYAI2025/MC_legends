@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import type { TextInboxRecord } from "@/application/submissions/submission-inbox-store";
 import {
   lockSubmissionInboxTable,
   unlockSubmissionInboxTable,
@@ -45,7 +45,7 @@ async function emptyTable(): Promise<void> {
   await inspect().query("TRUNCATE submission_inbox");
 }
 
-function sourceRecord(overrides: Partial<InboxRecord> = {}): InboxRecord {
+function sourceRecord(overrides: Partial<TextInboxRecord> = {}): TextInboxRecord {
   return {
     kind: "text",
     submissionId: "sub-import-1",

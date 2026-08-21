@@ -5,13 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
-import type { InboxRecord } from "@/application/submissions/submission-inbox-store";
+import type { TextInboxRecord } from "@/application/submissions/submission-inbox-store";
 import { describeSubmissionInboxStoreContract } from "./submission-inbox-store-contract";
 import { describeSubmissionInboxReaderContract } from "./submission-inbox-reader-contract";
+import { asTextEntry } from "../support/text-submission-shape";
 
 const ORIGINAL_TEXT = "  Der Steinwolf trägt eine Laterne.  ";
 
-function record(overrides: Partial<InboxRecord> = {}): InboxRecord {
+function record(overrides: Partial<TextInboxRecord> = {}): TextInboxRecord {
   return {
     kind: "text",
     receiptId: "receipt-001",
@@ -26,12 +27,12 @@ function record(overrides: Partial<InboxRecord> = {}): InboxRecord {
 
 let directory = "";
 
-async function storedRecords(inboxDirectory = directory): Promise<InboxRecord[]> {
+async function storedRecords(inboxDirectory = directory): Promise<TextInboxRecord[]> {
   const content = await readFile(join(inboxDirectory, "submissions.jsonl"), "utf8");
   return content
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as InboxRecord);
+    .map((line) => JSON.parse(line) as TextInboxRecord);
 }
 
 beforeEach(async () => {
@@ -57,7 +58,7 @@ describe("FileSubmissionInboxStore", () => {
     expect(lines).toHaveLength(2);
     expect(content.endsWith("\n")).toBe(true);
 
-    const parsed = lines.map((line) => JSON.parse(line) as InboxRecord);
+    const parsed = lines.map((line) => JSON.parse(line) as TextInboxRecord);
     expect(parsed[0]).toEqual(record());
     expect(parsed[0].originalText).toBe(ORIGINAL_TEXT);
     expect(parsed[1].receiptId).toBe("receipt-002");
@@ -72,7 +73,7 @@ describe("FileSubmissionInboxStore", () => {
 
     expect((await stat(missing)).isDirectory()).toBe(true);
     const content = await readFile(join(missing, "submissions.jsonl"), "utf8");
-    expect((JSON.parse(content.trim()) as InboxRecord).originalText).toBe(ORIGINAL_TEXT);
+    expect((JSON.parse(content.trim()) as TextInboxRecord).originalText).toBe(ORIGINAL_TEXT);
   });
 
   it("refuses to store a submissionId it already holds and returns the kept record", async () => {
@@ -408,7 +409,7 @@ describe("FileSubmissionInboxStore corruption", () => {
 
       const page = await new FileSubmissionInboxStore(directory).list({});
       expect(page.entries.map((entry) => entry.receiptId)).toEqual(["receipt-001"]);
-      expect(page.entries[0].originalText).toBe(ORIGINAL_TEXT);
+      expect(asTextEntry(page.entries[0]).originalText).toBe(ORIGINAL_TEXT);
     },
   );
 

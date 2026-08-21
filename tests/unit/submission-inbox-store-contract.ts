@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { asTextRecord } from "../support/text-submission-shape";
 import type {
-  InboxRecord,
+  TextInboxRecord,
   SubmissionInboxStore,
 } from "@/application/submissions/submission-inbox-store";
 
-export function inboxRecord(overrides: Partial<InboxRecord> = {}): InboxRecord {
+export function inboxRecord(overrides: Partial<TextInboxRecord> = {}): TextInboxRecord {
   return {
     kind: "text",
     submissionId: "sub-1",
@@ -54,7 +55,8 @@ export function describeSubmissionInboxStoreContract(
       await store.appendIfAbsent(record);
 
       const outcome = await store.appendIfAbsent(inboxRecord({ submissionId: "sub-ws" }));
-      expect(outcome.stored === false && outcome.existing.originalText).toBe(
+      expect(outcome.stored).toBe(false);
+      expect(asTextRecord(outcome.stored === false ? outcome.existing : undefined).originalText).toBe(
         "  ein drache mit  zwei koepfen  ",
       );
     });

@@ -17,6 +17,7 @@ import {
   lockSubmissionInboxTable,
   unlockSubmissionInboxTable,
 } from "../support/submission-inbox-table-lock";
+import { asTextRecord } from "../support/text-submission-shape";
 
 /**
  * A real PostgreSQL is the whole point of this file. `ON CONFLICT` holding under two
@@ -298,7 +299,10 @@ describe.skipIf(!ENABLED)("PostgresSubmissionInboxStore", () => {
         receiptId: "receipt-text-retry",
       }),
     );
-    expect(outcome.stored === false && outcome.existing.originalText).toBe(originalText);
+    expect(outcome.stored).toBe(false);
+    expect(asTextRecord(outcome.stored === false ? outcome.existing : undefined).originalText).toBe(
+      originalText,
+    );
   });
 });
 

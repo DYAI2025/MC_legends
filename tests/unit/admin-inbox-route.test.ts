@@ -11,6 +11,7 @@ import { FAMILY_SESSION_COOKIE } from "@/adapters/http/family-session-cookie";
 import type { InboxPage } from "@/application/submissions/submission-inbox-reader";
 import { resetRateLimitersForTest } from "@/composition/server";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
+import { asTextEntry } from "../support/text-submission-shape";
 
 const ENDPOINT = "http://localhost/api/admin/inbox/submissions";
 const ADMIN_CODE = "ein-eigener-admin-code-nur-fuer-erwachsene";
@@ -102,7 +103,7 @@ describe("GET /api/admin/inbox/submissions", () => {
     const page = (await (await GET(get())).json()) as InboxPage;
     const first = page.entries.find((entry) => entry.submissionId === "sub-1");
 
-    expect(first?.originalText).toBe("  ein drache mit  zwei koepfen  ");
+    expect(asTextEntry(first).originalText).toBe("  ein drache mit  zwei koepfen  ");
     expect(first?.receiptId).toBe("receipt-1");
     expect(first?.status).toBe("RECEIVED");
   });

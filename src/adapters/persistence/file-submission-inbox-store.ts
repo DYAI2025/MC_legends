@@ -70,17 +70,26 @@ function matches(record: InboxRecord, query: InboxQuery): boolean {
   return query.status === undefined || query.status === "RECEIVED";
 }
 
+/**
+ * A `switch` with no `default`, so a third submission kind is a compile error here rather
+ * than an entry silently missing whichever payload the new kind carries.
+ */
 function toEntry(record: InboxRecord): InboxEntry {
-  return {
+  const base = {
     submissionId: record.submissionId,
-    kind: record.kind,
     questionId: record.questionId,
     createdAt: record.createdAt,
     receivedAt: record.receivedAt,
     receiptId: record.receiptId,
-    originalText: record.originalText,
-    status: "RECEIVED",
+    status: "RECEIVED" as const,
   };
+
+  switch (record.kind) {
+    case "text":
+      return { ...base, kind: "text", originalText: record.originalText };
+    case "audio":
+      return { ...base, kind: "audio", audio: record.audio };
+  }
 }
 
 /**
