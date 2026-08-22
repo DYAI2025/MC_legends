@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpAudioAnswerInbox } from "@/adapters/http/http-audio-answer-inbox";
 import { AudioAnswerSender } from "@/adapters/media/audio-answer-sender";
 import type { CapturedAudio } from "@/adapters/media/audio-capture-controller";
+import { audioSendFailureMessage } from "@/app/audio-send-message";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
 import { familySessionCookieHeader } from "../support/family-session-header";
 import { MP3_ID3, WEBM } from "../support/audio-fixtures";
@@ -22,10 +23,15 @@ import { MP3_ID3, WEBM } from "../support/audio-fixtures";
  * What it is here to prove, in order of how expensive the mistake would be:
  *
  * 1. A recording made in a browser reaches durable storage and comes back with a receipt.
- * 2. An AMBIGUOUS first attempt - one that reached the server and whose answer the client
- *    never saw - followed by a retry leaves ONE recording, ONE row and ONE receipt. This
- *    is the case the stable submissionId exists for, and the case that silently produces
- *    duplicate answers if it is wrong.
+ * 2. An AMBIGUOUS first attempt, in BOTH of its shapes, followed by a retry leaves ONE
+ *    recording, ONE row and ONE receipt. This is the case the stable submissionId exists
+ *    for, and the case that silently produces duplicate answers if it is wrong. The two
+ *    shapes are: an answer the client never saw at all, and - MCL-30B review finding F1 -
+ *    an answer that came back HTTP-successful and valid JSON with the receipt fields gone.
+ *    Both are the same fact about the client (no acknowledgement in hand) and the same
+ *    fact about the server (it may hold the recording already), so both have to end in a
+ *    retryable state rather than a refusal, and both are built here against the REAL route
+ *    with the recording REALLY stored, because a fake response could not prove that.
  * 3. A file chosen because the microphone was unavailable takes exactly the same road.
  */
 
@@ -194,6 +200,101 @@ describe("a recording sent from the browser reaches the real route", () => {
     const rows = await inboxRows();
     expect(rows).toHaveLength(1);
     expect(sender.snapshot().receipt?.receiptId).toBe(rows[0].receiptId);
+  });
+
+  it("converges on one receipt when the first answer came back stripped of its receipt", async () => {
+    // MCL-30B review finding F1, built as the dangerous case rather than as a fake
+    // malformed response. Everything on the server side really happens: the route runs,
+    // the blob is written, the row is appended, a real receipt is minted. Only the ANSWER
+    // is damaged on the way back - still 201, still valid JSON, still saying yes, with the
+    // two fields that make it an acknowledgement removed, exactly as a proxy, a response
+    // rewrite or a truncated body removes them.
+    //
+    // Nothing about that is visible to the client, which is the whole point: it knows only
+    // that it holds no receipt. Reading that as `refused` would tell the child to record
+    // something new, and this test is what proves the recording they already made is fine
+    // and already at the project - so obeying that sentence would file a SECOND answer for
+    // one spoken sentence.
+    const submissionIds: string[] = [];
+    const statuses: number[] = [];
+    let mintedOnFirstAttempt = "";
+    let attempts = 0;
+
+    const sender = senderWith(async (input, init) => {
+      attempts += 1;
+      const answer = await routedFetch((request) => {
+        submissionIds.push(request.headers.get("x-avaloria-submission-id") ?? "");
+      })(input, init);
+      statuses.push(answer.status);
+
+      if (attempts > 1) return answer;
+
+      const body = (await answer.json()) as Record<string, unknown>;
+      // The server's own answer, before it is damaged: a real acknowledgement with a real
+      // receipt. Asserted rather than assumed, because if the route had refused this
+      // attempt the rest of the test would be measuring the wrong scenario entirely.
+      expect(body.acknowledged).toBe(true);
+      expect(typeof body.receiptId).toBe("string");
+      mintedOnFirstAttempt = String(body.receiptId);
+
+      return new Response(JSON.stringify({ acknowledged: true }), {
+        status: answer.status,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const recording = capture(WEBM, "audio/webm");
+    await sender.send(recording, QUESTION);
+
+    // 201 with a real receipt behind it: the recording IS durably stored right now, and
+    // the client has no way to know it.
+    expect(statuses).toEqual([201]);
+    expect(mintedOnFirstAttempt.length).toBeGreaterThan(0);
+
+    // Retryable, and not the permanent reason. No receipt, so no arrival is drawn.
+    expect(sender.snapshot().phase).toBe("failed");
+    expect(sender.snapshot().failure).toBe("transport");
+    expect(sender.snapshot().receipt).toBeNull();
+    // The recording is still in hand, so the button the child presses next is a retry of
+    // this answer and not the start of another one.
+    expect(sender.snapshot().recording).toBe(recording);
+
+    const failure = sender.snapshot().failure;
+    expect(failure).not.toBeNull();
+    const sentence = audioSendFailureMessage(failure!);
+    // What the child actually reads has to match what is actually true: try this again.
+    expect(sentence).toContain("noch einmal");
+    // And must not be the one sentence that asks for a new recording - which is precisely
+    // the sentence `refused` produces, and precisely how a duplicate answer gets filed.
+    expect(sentence).not.toBe(audioSendFailureMessage("refused"));
+    expect(sentence.toLowerCase()).not.toMatch(/nimm|such/u);
+
+    await sender.send(recording, QUESTION);
+
+    expect(sender.snapshot().phase).toBe("sent");
+    expect(attempts).toBe(2);
+    // The retry reached the real route carrying the SAME identity - not a similar one, the
+    // same string - which is the only reason the route could recognise it.
+    expect(submissionIds).toEqual(["contract-submission-1", "contract-submission-1"]);
+    expect(sender.submissionIdFor(recording)).toBe("contract-submission-1");
+    // 200, not 201: the route created nothing the second time and answered with the record
+    // it already held.
+    expect(statuses).toEqual([201, 200]);
+
+    // Exactly one of each, which is the claim this whole file exists to make.
+    const stored = await storedRecordings();
+    expect(stored).toHaveLength(1);
+    const bytes = await readFile(join(mediaDirectory, stored[0]));
+    expect(Array.from(new Uint8Array(bytes))).toEqual(Array.from(WEBM));
+
+    const rows = await inboxRows();
+    expect(rows).toHaveLength(1);
+    expect(new Set(rows.map((row) => row.receiptId)).size).toBe(1);
+
+    // And the receipt the child finally reads is the one minted during the attempt whose
+    // answer was destroyed - not a second one issued to paper over it.
+    expect(sender.snapshot().receipt?.receiptId).toBe(mintedOnFirstAttempt);
+    expect(rows[0].receiptId).toBe(mintedOnFirstAttempt);
   });
 
   it("sends a chosen file down the very same road as a recording", async () => {
