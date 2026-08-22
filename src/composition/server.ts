@@ -4,15 +4,22 @@ import { InMemoryRateLimiter } from "@/adapters/access/in-memory-rate-limiter";
 import { FileAudioBlobStore } from "@/adapters/persistence/file-audio-blob-store";
 import { FileSubmissionInboxStore } from "@/adapters/persistence/file-submission-inbox-store";
 import { PostgresSubmissionInboxStore } from "@/adapters/persistence/postgres-submission-inbox-store";
+import { FileQuestionLifecycleLog } from "@/adapters/persistence/file-question-lifecycle-log";
+import { PostgresQuestionLifecycleLog } from "@/adapters/persistence/postgres-question-lifecycle-log";
 import type { FamilyAccessGate } from "@/application/access/family-access";
 import { MAX_AUDIO_BYTES } from "@/domain/media/audio-artifact";
 import type { AudioBlobStore } from "@/application/media/audio-blob-store";
 import type { RateLimiter } from "@/application/access/rate-limiter";
 import type { SubmissionInboxStore } from "@/application/submissions/submission-inbox-store";
 import type { SubmissionInboxReader } from "@/application/submissions/submission-inbox-reader";
+import type {
+  QuestionLifecycleLog,
+  QuestionLifecycleReader,
+} from "@/application/questions/question-lifecycle";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
 const DEFAULT_MEDIA_DIRECTORY = ".data/media";
+const DEFAULT_QUESTION_DIRECTORY = ".data/questions";
 
 /**
  * Server-only composition root. Never import this from browser code - it resolves a
@@ -261,6 +268,62 @@ export function createSubmissionInboxReader(): SubmissionInboxReader {
   return new FileSubmissionInboxStore(
     process.env.AVALORIA_INBOX_DIR?.trim() || DEFAULT_INBOX_DIRECTORY,
   );
+}
+
+/**
+ * The write side of the question lifecycle (MCL-35): closing and reopening.
+ *
+ * Selected by the same rule as the inbox, and that sameness is the point: whichever
+ * store the changes are written to has to be the one the child page reads its rotation
+ * from. Two independent rules would eventually disagree, and the shape of that
+ * disagreement is an adult closing a question that keeps being asked.
+ *
+ * The file branch is MCL-48's rollback path applied to a second table, not a default:
+ * removing DATABASE_URL and restarting must return a WORKING system, question rotation
+ * included. Its serialisation is process-local and is neither distributed nor
+ * production-grade - see docs/ops/MCL-35-question-lifecycle.md.
+ *
+ * `||` rather than `??` for the directory, for the fourth time in this module and the
+ * same reason: a host UI that defines AVALORIA_QUESTION_DIR and leaves it empty has not
+ * configured a directory, and treating that as configured would hand `mkdir` an empty
+ * path while the site and its health check still looked fine.
+ */
+export function createQuestionLifecycleLog(): QuestionLifecycleLog {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresQuestionLifecycleLog(url);
+  }
+
+  return new FileQuestionLifecycleLog(questionDirectory());
+}
+
+/**
+ * The read side, selected the same way.
+ *
+ * A separate factory from the write side even though one class implements both, because
+ * the composition root is the only place that can hand out either capability: the child
+ * page asks for a reader and is structurally unable to receive the verb that retires a
+ * question for everybody.
+ */
+export function createQuestionLifecycleReader(): QuestionLifecycleReader {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresQuestionLifecycleLog(url);
+  }
+
+  return new FileQuestionLifecycleLog(questionDirectory());
+}
+
+/**
+ * Separate from AVALORIA_INBOX_DIR on purpose. That directory holds children's answers
+ * and is what a backup exists for; this one holds which questions are being asked, which
+ * is operational state a deployment may legitimately reset. One path would mean one
+ * restore that has to succeed for either to work.
+ */
+function questionDirectory(): string {
+  return process.env.AVALORIA_QUESTION_DIR?.trim() || DEFAULT_QUESTION_DIRECTORY;
 }
 
 function positiveInteger(raw: string | undefined, fallback: number): number {

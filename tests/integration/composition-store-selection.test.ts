@@ -61,3 +61,56 @@ describe.skipIf(!ENABLED)("createSubmissionInboxStore", () => {
     expect(createSubmissionInboxStore()).toBeInstanceOf(FileSubmissionInboxStore);
   });
 });
+
+/**
+ * The same wiring question for the MCL-35 lifecycle store. Both factories, not just one:
+ * the write side and the read side have to land on the SAME store, because an adult
+ * closing a question in one and a child reading the rotation from the other is the
+ * failure this pair of cases exists to catch - and it would look like a question that
+ * refuses to go away rather than like a configuration mistake.
+ */
+describe.skipIf(!ENABLED)("createQuestionLifecycleLog / createQuestionLifecycleReader", () => {
+  it("builds the PostgreSQL log when DATABASE_URL is set", async () => {
+    vi.stubEnv("DATABASE_URL", CONNECTION_STRING);
+
+    const { createQuestionLifecycleLog, createQuestionLifecycleReader } = await import(
+      "@/composition/server"
+    );
+    const { PostgresQuestionLifecycleLog } = await import(
+      "@/adapters/persistence/postgres-question-lifecycle-log"
+    );
+
+    // Constructed only - no pool is opened until the first query, so this case leaves no
+    // connection behind.
+    expect(createQuestionLifecycleLog()).toBeInstanceOf(PostgresQuestionLifecycleLog);
+    expect(createQuestionLifecycleReader()).toBeInstanceOf(PostgresQuestionLifecycleLog);
+  });
+
+  it("falls back to the file log when DATABASE_URL is not set", async () => {
+    vi.stubEnv("DATABASE_URL", undefined);
+
+    const { createQuestionLifecycleLog, createQuestionLifecycleReader } = await import(
+      "@/composition/server"
+    );
+    const { FileQuestionLifecycleLog } = await import(
+      "@/adapters/persistence/file-question-lifecycle-log"
+    );
+
+    expect(createQuestionLifecycleLog()).toBeInstanceOf(FileQuestionLifecycleLog);
+    expect(createQuestionLifecycleReader()).toBeInstanceOf(FileQuestionLifecycleLog);
+  });
+
+  it("falls back to the file log when DATABASE_URL is defined but blank", async () => {
+    // Same reason the inbox does: a host that defines the variable and leaves it empty
+    // has not configured a database, and `??` would hand the adapter an empty connection
+    // string while the site and /api/health both still looked fine.
+    vi.stubEnv("DATABASE_URL", "   ");
+
+    const { createQuestionLifecycleLog } = await import("@/composition/server");
+    const { FileQuestionLifecycleLog } = await import(
+      "@/adapters/persistence/file-question-lifecycle-log"
+    );
+
+    expect(createQuestionLifecycleLog()).toBeInstanceOf(FileQuestionLifecycleLog);
+  });
+});
