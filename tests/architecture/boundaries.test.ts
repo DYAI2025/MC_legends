@@ -124,6 +124,9 @@ describe("architecture boundaries", () => {
       // MCL-30A. Reaches for microphone and object URLs, so it is exactly the kind of
       // component that would otherwise be tempted to import a server module for them.
       "src/app/components/audio-answer-recorder.tsx",
+      // MCL-35. The one client component that can CHANGE something for everybody, so a
+      // server-root import here would be the worst place in the app to leave uncovered.
+      "src/app/components/admin-question-board.tsx",
     ]) {
       await expectNoForbiddenSource(clientComponent, [
         /from ["']@\/composition\/server["']/,

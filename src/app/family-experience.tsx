@@ -32,12 +32,38 @@ import {
   childStatusPresentationFor,
   childTopicLabelFor,
 } from "@/content/content-source";
-import { focusQuestion, otherOpenQuestions } from "@/content/open-questions";
+import { questionById } from "@/content/open-questions";
+import {
+  answerBelongsToEarlierQuestionMessage,
+  answerBelongsToMessage,
+  noOpenQuestionMessage,
+  questionUnavailableMessage,
+} from "@/app/question-message";
 
 const repository = createBrowserSubmissionRepository();
 const inbox = createBrowserSubmissionInbox();
-const question = focusQuestion();
-const upcomingQuestions = otherOpenQuestions();
+
+/**
+ * Which question is being asked, as the server decided it (MCL-35).
+ *
+ * Ids rather than whole questions, because the wording is already in this bundle - the
+ * component looks it up in the same dataset the server read - and sending it twice would
+ * be two copies of one sentence that could disagree.
+ *
+ * `unavailable` is a separate member rather than `activeQuestionId: null`, and that
+ * distinction is the whole point: "every question has been answered" and "we could not
+ * find out which question is open" are different facts, they lead to different sentences,
+ * and only one of them may leave the answer form standing. Collapsing them would let a
+ * child write an answer to whatever the page last knew about - which is exactly the stale
+ * question nobody can promise anything about.
+ */
+export type QuestionRotationProps =
+  | Readonly<{
+      availability: "available";
+      activeQuestionId: string | null;
+      upcomingQuestionIds: readonly string[];
+    }>
+  | Readonly<{ availability: "unavailable" }>;
 
 export type FamilyExperienceProps = Readonly<{
   /**
@@ -55,11 +81,19 @@ export type FamilyExperienceProps = Readonly<{
    * answer would be two chances for them to disagree.
    */
   selectedCategory: CategoryFilter;
+  /**
+   * MCL-35. Decided on the server, per request, from the lifecycle store - never read
+   * here and never cached at module load. The version of this that read the dataset once
+   * when the module was first imported could not see a rotation at all: the page kept
+   * asking the question that was open when the process started.
+   */
+  questions: QuestionRotationProps;
 }>;
 
 export function FamilyExperience({
   familySessionActive,
   selectedCategory,
+  questions,
 }: FamilyExperienceProps) {
   const router = useRouter();
   const [answer, setAnswer] = useState("");
@@ -72,6 +106,29 @@ export function FamilyExperience({
   const [retryMessages, setRetryMessages] = useState<Readonly<Record<string, string | undefined>>>(
     {},
   );
+  /**
+   * The question in front of the child, or null - either because nothing is open or
+   * because the store could not be read. The two are told apart below; here they are the
+   * same thing, which is "there is no question to put a form under".
+   */
+  const question = useMemo(
+    () =>
+      questions.availability === "available" && questions.activeQuestionId !== null
+        ? questionById(questions.activeQuestionId)
+        : null,
+    [questions],
+  );
+
+  const upcomingQuestions = useMemo(
+    () =>
+      questions.availability === "available"
+        ? questions.upcomingQuestionIds
+            .map((id) => questionById(id))
+            .filter((upcoming) => upcoming !== null)
+        : [],
+    [questions],
+  );
+
   const visibleIdeas = useMemo(
     () =>
       selectedCategory === allIdeasFilter
@@ -140,6 +197,11 @@ export function FamilyExperience({
   async function handleAnswerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (answer.trim().length === 0 || isSaving) return;
+    // MCL-35: the form is not rendered without a question, so this is unreachable from
+    // the page - but it is the guard that makes "an answer is always an answer to a
+    // question" true of this function rather than of the JSX above it. A submission with
+    // an invented questionId is the one thing rotation must never be able to produce.
+    if (question === null) return;
 
     setIsSaving(true);
     setSavedMessage(null);
@@ -192,6 +254,19 @@ export function FamilyExperience({
       setRetryingId(null);
       await refreshSubmissions();
     }
+  }
+
+  /**
+   * The question one stored answer was written for.
+   *
+   * An answer lives in this browser and can outlive the wording it was written for, so
+   * the unknown case is a real one and is answered honestly rather than with an id.
+   */
+  function answerQuestionLabel(questionId: string): string {
+    const answered = questionById(questionId);
+    return answered === null
+      ? answerBelongsToEarlierQuestionMessage
+      : answerBelongsToMessage(answered.title);
   }
 
   return (
@@ -324,6 +399,34 @@ export function FamilyExperience({
       </section>
 
       <section className="answer-section content-width" id="frage" aria-labelledby="question-heading">
+        {/*
+          MCL-35. Three states, and the middle one is the reason they are three.
+
+          A store that cannot be read is NOT drawn as "no question is open": that would be
+          this page inventing a fact about the project out of its own failure, and a child
+          told the questions are finished has no reason to come back. It is also the state
+          in which no form may stand - an answer written now would be written against
+          whatever this page last believed, which is precisely the thing nobody can vouch
+          for any more.
+        */}
+        {question === null ? (
+          <div className="question-card question-card-empty">
+            <div className="question-art" aria-hidden="true"><span>?</span></div>
+            <div className="question-copy">
+              <p className="section-kicker">Eine offene Frage</p>
+              <h2 id="question-heading">
+                {questions.availability === "unavailable"
+                  ? questionUnavailableMessage().title
+                  : noOpenQuestionMessage().title}
+              </h2>
+              <p>
+                {questions.availability === "unavailable"
+                  ? questionUnavailableMessage().body
+                  : noOpenQuestionMessage().body}
+              </p>
+            </div>
+          </div>
+        ) : (
         <div className="question-card">
           <div className="question-art" aria-hidden="true"><span>?</span></div>
           <div className="question-copy">
@@ -371,15 +474,22 @@ export function FamilyExperience({
             {familySessionActive ? <AudioAnswerRecorder questionId={question.id} /> : null}
           </div>
         </div>
+        )}
 
-        <div className="upcoming-questions" aria-labelledby="upcoming-heading">
-          <h3 id="upcoming-heading">Diese Fragen kommen später dran</h3>
-          <ul>
-            {upcomingQuestions.map((upcoming) => (
-              <li key={upcoming.id}>{upcoming.title}</li>
-            ))}
-          </ul>
-        </div>
+        {/*
+          Absent rather than empty when there is nothing waiting. A heading promising
+          later questions above an empty list is a promise the page cannot keep.
+        */}
+        {upcomingQuestions.length === 0 ? null : (
+          <div className="upcoming-questions" aria-labelledby="upcoming-heading">
+            <h3 id="upcoming-heading">Diese Fragen kommen später dran</h3>
+            <ul>
+              {upcomingQuestions.map((upcoming) => (
+                <li key={upcoming.id}>{upcoming.title}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="my-ideas-section content-width" id="meine-ideen" aria-labelledby="my-ideas-heading">
@@ -400,6 +510,14 @@ export function FamilyExperience({
               const arrived = hasArrivedInProject(submission.status);
               return (
                 <li className="my-idea" key={submission.id}>
+                  {/*
+                    MCL-35. Which question this answer belongs to, in the question's own
+                    words. Once questions rotate, an answer with no question next to it is
+                    an answer to something a child can no longer identify - and the id,
+                    which is how this application finds it, is not a thing they have any
+                    use for.
+                  */}
+                  <p className="my-idea-question">{answerQuestionLabel(submission.questionId)}</p>
                   <p className="my-idea-text">{submission.originalText}</p>
                   {/*
                     Deliberately not the legend's status-* classes or icons. Those

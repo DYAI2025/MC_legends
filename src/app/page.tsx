@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { FamilyExperience } from "@/app/family-experience";
 import { FAMILY_SESSION_COOKIE } from "@/adapters/http/family-session-cookie";
 import { createFamilyAccessGate } from "@/composition/server";
+import { readQuestionSnapshot } from "@/app/question-rotation-source";
+import { rotateQuestions } from "@/content/open-questions";
 import { categoryFilterFromSlug, THEMA_PARAM } from "@/content/avaloria-content";
 
 /**
@@ -29,6 +31,12 @@ export default async function HomePage({
     typeof themaParam === "string" ? themaParam : undefined,
   );
 
+  // MCL-35: which question is being asked is runtime state now, read per request. A
+  // store that cannot be read is passed on as `unavailable` rather than falling back to
+  // the seeded dataset - see readQuestionSnapshot for why that fallback is refused.
+  const snapshot = await readQuestionSnapshot();
+  const rotation = snapshot === null ? null : rotateQuestions(snapshot);
+
   // Only an explicit grant opens the form. An unavailable gate - no access code
   // configured - shows the sign-in panel like any other refusal, so a misconfigured
   // server never presents a writable surface.
@@ -36,6 +44,15 @@ export default async function HomePage({
     <FamilyExperience
       familySessionActive={check.outcome === "granted"}
       selectedCategory={selectedCategory}
+      questions={
+        rotation === null
+          ? { availability: "unavailable" }
+          : {
+              availability: "available",
+              activeQuestionId: rotation.active?.id ?? null,
+              upcomingQuestionIds: rotation.upcoming.map((question) => question.id),
+            }
+      }
     />
   );
 }

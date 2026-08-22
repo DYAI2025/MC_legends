@@ -7,6 +7,9 @@ export default defineConfig([
   ...nextTs,
   globalIgnores([
     ".next/**",
+    // MCL-35: the second Playwright dev server builds here (NEXT_DIST_DIR). Build output,
+    // not source - and unignored it adds several hundred errors from generated files.
+    ".next-lifecycle/**",
     "out/**",
     "build/**",
     "coverage/**",
