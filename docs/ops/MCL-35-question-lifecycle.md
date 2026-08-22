@@ -250,3 +250,42 @@ No new secret is introduced, so `scripts/check-secrets.mjs`,
   recordings (recorded in migration 0002). Open product/privacy question.
 - The per-address rate-limit keys remain spoofable (`x-forwarded-for`); only the
   constant-key global limiters are a real ceiling. Unchanged by this slice.
+
+## Running the tests
+
+```bash
+# unit, architecture and (with a database) integration
+export MCL_TEST_DATABASE_URL=postgresql://…/mcl_test
+DATABASE_URL="$MCL_TEST_DATABASE_URL" npm run db:migrate
+npm run test && npm run check:integration-ran
+
+# browser, both servers
+rm -rf .data && E2E_PORT=3199 E2E_LIFECYCLE_PORT=3198 npx playwright test
+npx playwright test --project=chromium-lifecycle    # only this slice
+```
+
+Playwright starts **two** servers. `tests/e2e/question-lifecycle.spec.ts` closes questions,
+which changes what every visitor is asked, so it runs in its own `chromium-lifecycle`
+project against a second server on `E2E_LIFECYCLE_PORT` (default 3101) with its own
+`AVALORIA_{QUESTION,INBOX,MEDIA}_DIR` under `.data/e2e-lifecycle`. The `chromium` project
+ignores that spec. Without the separation, closing a question would break
+`tests/e2e/foundation.spec.ts` and `tests/e2e/family-mvp.spec.ts` - which assert the
+seeded question by name - at whatever moment the two happened to overlap.
+
+Two traps worth knowing before you debug them:
+
+- **A local (dev-mode) run rewrites `next-env.d.ts`.** `next dev` locks its build
+  directory and refuses a second instance, so locally the second server runs with
+  `NEXT_DIST_DIR=.next-lifecycle` - and `next dev` rewrites `next-env.d.ts` to point at
+  whichever directory it is using. Restore it before committing, together with
+  `AGENTS.md` and `tsconfig.json`, which plain `next dev` already rewrites:
+  `git checkout -- next-env.d.ts tsconfig.json AGENTS.md`. In CI the variable is unset and
+  both servers are `next start` over the one build, so nothing is rewritten there. CI would
+  catch a committed one anyway - the build rewrites the file and the "Require committed
+  next-env types" step fails - but that is noise nobody should have to diagnose.
+- **The lifecycle spec empties its log before every test**, by removing
+  `.data/e2e-lifecycle/questions`. Reopening every closed question would NOT be an
+  equivalent reset: a reopened question queues behind the ones that never left, so the
+  next test would be asked something other than the seeded question. The path is
+  duplicated between the spec and `playwright.config.ts`, so the spec asserts what the
+  reset achieved - a wrong path shows up as a non-empty archive and fails loudly.

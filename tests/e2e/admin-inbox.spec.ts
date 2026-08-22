@@ -180,7 +180,11 @@ test("filtering by question narrows the list, and resetting widens it again", as
   await expect(entries.filter({ hasText: "companion-animal" })).not.toHaveCount(0);
   await expect(entries.filter({ hasText: "hidden-door" })).not.toHaveCount(0);
 
-  await page.getByLabel("Frage").fill("hidden-door");
+  // `exact` since MCL-35: getByLabel matches a label by SUBSTRING, and the question
+  // board that slice added to this page is a region labelled "Offene Fragen" - which
+  // contains "Frage". Without it this locator resolves to two elements and every case
+  // that types a filter throws a strict-mode violation.
+  await page.getByLabel("Frage", { exact: true }).fill("hidden-door");
 
   await expect(entries.filter({ hasText: "companion-animal" })).toHaveCount(0);
   await expect(entries.filter({ hasText: "hidden-door" })).not.toHaveCount(0);
@@ -307,13 +311,13 @@ test("typing a question id costs one read rather than one per keystroke", async 
     (request) =>
       request.url().includes(ADMIN_INBOX) && request.url().includes(`questionId=${typed}`),
   );
-  await page.getByLabel("Frage").pressSequentially(typed, { delay: 10 });
+  await page.getByLabel("Frage", { exact: true }).pressSequentially(typed, { delay: 10 });
   await committedRead;
 
   const readsFromTyping = reads - readsBeforeTyping;
 
   // Guard against a vacuous pass: the keystrokes really did happen.
-  expect(await page.getByLabel("Frage").inputValue()).toBe(typed);
+  expect(await page.getByLabel("Frage", { exact: true }).inputValue()).toBe(typed);
   expect(typed.length).toBe(16);
   // One commit is the intent; the ceiling is loose enough to survive a slow machine that
   // stretches the typing past one debounce window, and still an order of magnitude below
@@ -336,7 +340,7 @@ test("rapid filter changes settle on the last value typed, not an earlier one", 
   const entries = page.locator(".admin-entry");
   await expect(entries.first()).toBeVisible();
 
-  const question = page.getByLabel("Frage");
+  const question = page.getByLabel("Frage", { exact: true });
   await question.fill("companion-animal");
   await question.fill("gibt-es-nicht");
   await question.fill("hidden-door");
@@ -413,7 +417,7 @@ test("a failed read leaves exactly one live region speaking", async ({ page }) =
 
   // A questionId the route refuses outright: over its 200-character ceiling, so the answer
   // is 400 invalid-query and the view takes its failure branch.
-  await page.getByLabel("Frage").fill("z".repeat(201));
+  await page.getByLabel("Frage", { exact: true }).fill("z".repeat(201));
 
   await expect(inbox.getByText("Diese Filterkombination ist nicht gültig. Bitte die Auswahl ändern.")).toBeVisible();
   // The assertion: one region, not two. Counted rather than asserted through a strict

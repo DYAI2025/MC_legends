@@ -34,3 +34,6 @@ artifacts/
 
 # local family project inbox (AVALORIA_INBOX_DIR default)
 /.data/
+
+# second Playwright dev server's build directory (MCL-35, NEXT_DIST_DIR)
+/.next-lifecycle/
