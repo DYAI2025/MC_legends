@@ -191,7 +191,7 @@ addressing plus the atomic temp-write-fsync-rename-fsync, not locking.
 ### 7.1 The browser side of the same contract (MCL-30B)
 
 The client half is `HttpAudioAnswerInbox` (`src/adapters/http/http-audio-answer-inbox.ts`),
-driven by `AudioAnswerSender` (`src/adapters/media/audio-answer-sender.ts`). Four decisions
+driven by `AudioAnswerSender` (`src/adapters/media/audio-answer-sender.ts`). Five decisions
 in it are what make the retry semantics above reachable from a child's browser:
 
 | Decision | Why |
@@ -199,7 +199,8 @@ in it are what make the retry semantics above reachable from a child's browser:
 | **One `submissionId` per recording, not per press** | Minted on the first attempt and keyed to the captured object's identity. It is what makes the convergence above happen: after an ambiguous failure the retry carries the same id, so the route answers `200` with the receipt it already minted instead of filing a second answer. Re-recording or picking a different file mints a new one. |
 | **The declared type is sniffed, not read off the Blob** | The route refuses a request whose declared `content-type` disagrees with what it sniffs from the bytes. A browser labels a recording `audio/webm;codecs=opus` and a picked file `audio/x-m4a`, `audio/mp3` or nothing at all — none of which are allowlist members. The client runs the domain's own `sniffAudioMimeType` over the first 16 bytes, so the two sides agree by construction. |
 | **Upload deadline 120 s, not the text inbox's 10 s** | 8 MiB in 10 s needs 6.7 Mbit/s of upload. 120 s tolerates roughly 0.6 Mbit/s at the ceiling. It is a *total* deadline, not an idle one — fetch offers no upload-progress signal without duplex streaming — so a slower uplink ends as a retryable failure with the recording still in hand. |
-| **`sent` is reachable only from a receipt** | `readServerReceipt` (`src/adapters/http/server-receipt.ts`) is the single definition of an acknowledgement for both inboxes. A `200`/`201` that says `acknowledged: true` without two non-blank receipt fields is a refusal, not an arrival. |
+| **`sent` is reachable only from a receipt** | `readServerReceipt` (`src/adapters/http/server-receipt.ts`) is the single definition of an acknowledgement for both inboxes. A `200`/`201` that says `acknowledged: true` without two non-blank receipt fields is **not an arrival** — the client holds no receipt, so nothing draws "Im Projekt angekommen". |
+| **A receipt-less `2xx` is ambiguous, not a refusal** (MCL-30B review finding F1) | It is classified `transport`, alongside a timeout and an unreadable body, and never `refused`. All it proves is that *this client* got no acknowledgement; the server may already hold the blob, the row and a receipt that a proxy, a response rewrite or a truncated body removed on the way back. `refused` is the one reason whose child-facing sentence asks for a **new** recording, so using it here would file a second answer for one spoken sentence. `transport` invites the retry that the same `submissionId` makes converge on the stored receipt. Proven end-to-end against the real route in `tests/unit/audio-send-contract.test.ts` ("came back stripped of its receipt") and in a real browser in `tests/e2e/audio-capture.spec.ts`. |
 
 **Known limitation, deliberate and recorded rather than fixed:** a finished recording that
 has not been sent lives only in the page's memory. An ordinary re-render or a topic change
