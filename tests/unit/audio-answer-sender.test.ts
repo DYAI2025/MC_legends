@@ -95,6 +95,21 @@ function senderFor(inbox: AudioAnswerInbox): AudioAnswerSender {
   return new AudioAnswerSender(inbox, dependencies());
 }
 
+/**
+ * Binds a recording to its question and sends it, the way the recording area does: the
+ * question is chosen when the recording appears, and the send that follows carries no
+ * question at all. Two calls rather than one, because that separation is the fix - a
+ * helper that took both and passed both would be the old API wearing a different name.
+ */
+async function prepareAndSend(
+  sender: AudioAnswerSender,
+  recording: CapturedAudio,
+  questionId: string = QUESTION,
+): Promise<void> {
+  sender.prepare(recording, questionId);
+  await sender.send(recording);
+}
+
 describe("AudioAnswerSender", () => {
   it("starts idle and claims nothing", () => {
     const state = senderFor(unreachableInbox).snapshot();
@@ -112,7 +127,7 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
 
     const state = sender.snapshot();
     expect(state.phase).toBe("sent");
@@ -134,7 +149,7 @@ describe("AudioAnswerSender", () => {
     // A Chromium recording arrives as `audio/webm;codecs=opus`, which is not an allowlist
     // member; the route refuses anything whose declared type is not one. Sniffing makes
     // the declaration agree with what the route will compute, by construction.
-    await sender.send(capture(WEBM, { type: "audio/webm;codecs=opus" }), QUESTION);
+    await prepareAndSend(sender, capture(WEBM, { type: "audio/webm;codecs=opus" }));
     expect(drafts[0].mimeType).toBe("audio/webm");
   });
 
@@ -148,7 +163,7 @@ describe("AudioAnswerSender", () => {
     const { inbox, drafts } = acknowledging();
     const sender = senderFor(inbox);
 
-    await sender.send(capture(bytes, { type: label, source: "file", fileName: "ton.dat" }), QUESTION);
+    await prepareAndSend(sender, capture(bytes, { type: label, source: "file", fileName: "ton.dat" }));
 
     expect(sender.snapshot().phase).toBe("sent");
     // The vendor spelling and the empty label are the two cases a browser really produces
@@ -169,13 +184,13 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(sender.snapshot().phase).toBe("failed");
     expect(sender.snapshot().failure).toBe("transport");
     // The recording is still the one in hand: nothing was consumed by the failure.
     expect(sender.snapshot().recording).toBe(recording);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(sender.snapshot().phase).toBe("sent");
 
     expect(drafts).toHaveLength(2);
@@ -190,8 +205,8 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
 
     const first = capture(WEBM);
-    await sender.send(first, QUESTION);
-    await sender.send(capture(OGG), QUESTION);
+    await prepareAndSend(sender, first);
+    await prepareAndSend(sender, capture(OGG));
 
     expect(drafts.map((draft) => draft.submissionId)).toEqual(["id-1", "id-2"]);
     // And the first id is still the first recording's, not reassigned.
@@ -212,14 +227,14 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    const first = sender.send(recording, QUESTION);
+    const first = prepareAndSend(sender, recording);
     // Let the size check and the sniff settle so the attempt is genuinely in flight.
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     expect(sender.snapshot().phase).toBe("sending");
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     release();
     await first;
 
@@ -234,8 +249,8 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    await sender.send(recording, QUESTION);
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
+    await prepareAndSend(sender, recording);
 
     expect(drafts).toHaveLength(1);
   });
@@ -250,9 +265,9 @@ describe("AudioAnswerSender", () => {
     const abandoned = capture(WEBM);
     const current = capture(OGG);
 
-    const first = sender.send(abandoned, QUESTION);
+    const first = prepareAndSend(sender, abandoned);
     await settle();
-    const second = sender.send(current, QUESTION);
+    const second = prepareAndSend(sender, current);
     await settle();
 
     // The abandoned attempt answers last. Its outcome must not land on the page the child
@@ -276,7 +291,7 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
 
     const state = sender.snapshot();
     expect(state.phase).toBe("failed");
@@ -291,7 +306,7 @@ describe("AudioAnswerSender", () => {
     });
 
     const sender = senderFor(inbox);
-    await sender.send(capture(WEBM), QUESTION);
+    await prepareAndSend(sender, capture(WEBM));
 
     // Reporting a passing fault as permanent would tell a child to record something new
     // when the recording they have is fine.
@@ -305,7 +320,7 @@ describe("AudioAnswerSender", () => {
       blob: new Blob([new Uint8Array(MAX_AUDIO_BYTES + 1)], { type: "audio/webm" }),
     };
 
-    await sender.send(oversized, QUESTION);
+    await prepareAndSend(sender, oversized);
 
     expect(sender.snapshot().phase).toBe("failed");
     expect(sender.snapshot().failure).toBe("audio-too-large");
@@ -323,7 +338,7 @@ describe("AudioAnswerSender", () => {
     const { inbox, drafts } = acknowledging();
     const sender = senderFor(inbox);
 
-    await sender.send({ ...capture(WEBM), blob: new Blob([bytes], { type: "audio/webm" }) }, QUESTION);
+    await prepareAndSend(sender, { ...capture(WEBM), blob: new Blob([bytes], { type: "audio/webm" }) });
 
     expect(sender.snapshot().phase).toBe("sent");
     expect(drafts).toHaveLength(1);
@@ -335,7 +350,7 @@ describe("AudioAnswerSender", () => {
   ])("refuses %s before it is uploaded", async (_name, bytes) => {
     const sender = senderFor(unreachableInbox);
 
-    await sender.send(capture(bytes, { type: "audio/webm", source: "file" }), QUESTION);
+    await prepareAndSend(sender, capture(bytes, { type: "audio/webm", source: "file" }));
 
     // The label said audio; the bytes did not. Refused here rather than sent for the
     // route to refuse, because the answer is already knowable from sixteen bytes.
@@ -353,7 +368,7 @@ describe("AudioAnswerSender", () => {
       } as unknown as Blob,
     };
 
-    await sender.send(unreadable, QUESTION);
+    await prepareAndSend(sender, unreadable);
 
     // Distinct from "not audio": the child's next step is to choose the file again, not
     // to choose a different one.
@@ -369,7 +384,7 @@ describe("AudioAnswerSender", () => {
     const sender = senderFor(inbox);
     const recording = capture(WEBM);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(sender.snapshot().phase).toBe("failed");
 
     sender.dismissFailure();
@@ -378,7 +393,7 @@ describe("AudioAnswerSender", () => {
     // Still about the same recording, so the area does not fall back to "no recording".
     expect(sender.snapshot().recording).toBe(recording);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(drafts[0].submissionId).toBe(drafts[1].submissionId);
   });
 
@@ -388,12 +403,132 @@ describe("AudioAnswerSender", () => {
     const seen: string[] = [];
     const unsubscribe = sender.subscribe(() => seen.push(sender.snapshot().phase));
 
-    await sender.send(capture(WEBM), QUESTION);
-    expect(seen).toEqual(["sending", "sent"]);
+    await prepareAndSend(sender, capture(WEBM));
+    // Three, not two: binding a recording is itself a published change since MCL-35.
+    // It has to be, because the binding lives in private state that no snapshot exposes,
+    // and the recording area only learns it may offer the send button by re-rendering.
+    // A silent `prepare` would leave the button disabled until something else happened.
+    expect(seen).toEqual(["idle", "sending", "sent"]);
 
     unsubscribe();
-    await sender.send(capture(OGG), QUESTION);
-    expect(seen).toEqual(["sending", "sent"]);
+    await prepareAndSend(sender, capture(OGG));
+    expect(seen).toEqual(["idle", "sending", "sent"]);
+  });
+});
+
+/**
+ * MCL-35. A recording answers the question it was made for, and nothing that happens
+ * afterwards can re-aim it.
+ *
+ * This is the hazard MCL-30 handed over: `send` used to take the question as a parameter,
+ * so every attempt re-stated it - and the recording area passed whatever the page was
+ * asking at that moment. A recording captured while A was being asked, sent after an
+ * adult closed A, went to the project as an answer to B. Nothing would have looked wrong
+ * anywhere: the child spoke about A, the project filed it under B.
+ *
+ * The cases below are written so that they FAIL if the binding ever moves back to send
+ * time, rather than merely passing while it happens to be right.
+ */
+describe("AudioAnswerSender question binding", () => {
+  const LATER_QUESTION = "druhen-protection";
+
+  it("sends the question the recording was bound to, not the one asked later", async () => {
+    const { inbox, drafts } = acknowledging();
+    const sender = senderFor(inbox);
+    const recording = capture(WEBM);
+
+    // Bound while A is being asked.
+    sender.prepare(recording, QUESTION);
+    // The page rotates: an adult closed A, so the recorder's effect runs again with B.
+    sender.prepare(recording, LATER_QUESTION);
+
+    await sender.send(recording);
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].questionId).toBe(QUESTION);
+    expect(sender.boundQuestionIdFor(recording)).toBe(QUESTION);
+  });
+
+  it("keeps both the submissionId and the question across an ambiguous retry", async () => {
+    let attempts = 0;
+    const { inbox, drafts } = inboxThat(async () => {
+      attempts += 1;
+      // The dangerous shape: the first attempt never produced an answer, so this browser
+      // cannot know whether the project already holds the recording.
+      if (attempts === 1) throw new AudioAnswerInboxError("transport");
+      return RECEIPT;
+    });
+
+    const sender = senderFor(inbox);
+    const recording = capture(WEBM);
+
+    sender.prepare(recording, QUESTION);
+    await sender.send(recording);
+    expect(sender.snapshot().phase).toBe("failed");
+
+    // Rotation happens between the failure and the retry - the worst possible moment,
+    // and the one a child is most likely to hit, because a failure is exactly when they
+    // leave the page open and come back.
+    sender.prepare(recording, LATER_QUESTION);
+    await sender.send(recording);
+
+    expect(drafts).toHaveLength(2);
+    // Same answer, twice attempted: the route is idempotent by submissionId, so this is
+    // what makes the retry converge on one stored answer instead of filing a second.
+    expect(drafts[0].submissionId).toBe(drafts[1].submissionId);
+    expect(drafts[0].createdAt).toBe(drafts[1].createdAt);
+    // And it converges under the SAME question. Without this, a retry after rotation
+    // would produce one answer to A and one to B for one spoken sentence.
+    expect(drafts.map((draft) => draft.questionId)).toEqual([QUESTION, QUESTION]);
+  });
+
+  it("offers no parameter through which a later question could enter a send", async () => {
+    // The structural countertest. Every behavioural case above could be satisfied by a
+    // guard inside `send`; this one cannot - it fails the moment the parameter comes
+    // back, whatever the body of the method then does with it.
+    const sender = senderFor(unreachableInbox);
+
+    expect(sender.send.length).toBe(1);
+    expect(sender.prepare.length).toBe(2);
+  });
+
+  it("does nothing at all for a recording that was never bound", async () => {
+    const sender = senderFor(unreachableInbox);
+    const recording = capture(WEBM);
+
+    await sender.send(recording);
+
+    // Not an error and not a failure state: unreachable from the recording area, which
+    // does not offer the button until the recording is bound. What matters is that no
+    // question was invented to make the send possible - the inbox was never called.
+    expect(sender.snapshot()).toEqual<AudioSendState>({
+      phase: "idle",
+      failure: null,
+      receipt: null,
+      recording: null,
+    });
+    expect(sender.boundQuestionIdFor(recording)).toBeNull();
+  });
+
+  it("binds a new recording to the question being asked when it appears", async () => {
+    const { inbox, drafts } = acknowledging();
+    const sender = senderFor(inbox);
+
+    const first = capture(WEBM);
+    sender.prepare(first, QUESTION);
+
+    // The child throws it away and records again, after the rotation. The new recording
+    // is a different object, so it is a different answer to a different question - which
+    // is exactly right.
+    const second = capture(OGG);
+    sender.prepare(second, LATER_QUESTION);
+
+    await sender.send(second);
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].questionId).toBe(LATER_QUESTION);
+    expect(sender.boundQuestionIdFor(first)).toBeNull();
+    expect(sender.boundQuestionIdFor(second)).toBe(LATER_QUESTION);
   });
 });
 

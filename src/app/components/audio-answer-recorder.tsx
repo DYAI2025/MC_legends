@@ -12,6 +12,11 @@ import {
   createBrowserAudioAnswerSender,
   createBrowserAudioCaptureController,
 } from "@/composition/browser";
+import {
+  recordingBelongsToEarlierQuestionMessage,
+  recordingBelongsToMessage,
+} from "@/app/question-message";
+import { questionById } from "@/content/open-questions";
 
 /**
  * MCL-30A/MCL-30B. The child-facing recording area: start, stop, listen, throw away,
@@ -63,6 +68,20 @@ export function AudioAnswerRecorder({ questionId }: AudioAnswerRecorderProps) {
   // on the page - cannot run this cleanup and cannot take a finished recording away.
   useEffect(() => controller.release, [controller]);
 
+  /**
+   * MCL-35. The recording is bound to the question it answers the moment it appears, not
+   * when it is sent.
+   *
+   * `questionId` is in the dependency list on purpose, even though `prepare` ignores it
+   * for a recording it has already bound. Leaving it out would make this effect claim it
+   * does not depend on the question, which is false and would rot the moment somebody
+   * changed `prepare`. Rotation re-runs this and nothing happens - which is exactly the
+   * behaviour a countertest in tests/unit/audio-answer-sender.test.ts pins.
+   */
+  useEffect(() => {
+    if (state.recording !== null) sender.prepare(state.recording, questionId);
+  }, [sender, state.recording, questionId]);
+
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     // Reset the field, so choosing the same file twice is still a choice the child can
@@ -85,6 +104,18 @@ export function AudioAnswerRecorder({ questionId }: AudioAnswerRecorderProps) {
   const send = sent.recording === recording ? sent : idleSendState;
   const isSending = send.phase === "sending";
   const hasArrived = send.phase === "sent";
+
+  /*
+    Which question this recording answers, read from the sender rather than from the prop.
+    The prop is what the page is asking NOW; this is what the child was answering when
+    they spoke, and after a rotation those are two different questions. Never rendered as
+    an id - only used to decide whether to say, in words, which question the recording
+    belongs to.
+  */
+  const boundQuestionId = recording === null ? null : sender.boundQuestionIdFor(recording);
+  const belongsElsewhere = boundQuestionId !== null && boundQuestionId !== questionId;
+  const boundQuestionTitle =
+    boundQuestionId === null ? null : (questionById(boundQuestionId)?.title ?? null);
 
   return (
     <section className="audio-answer" aria-labelledby="audio-answer-heading">
@@ -176,11 +207,28 @@ export function AudioAnswerRecorder({ questionId }: AudioAnswerRecorderProps) {
         then, and a page that let a child think discarding un-sends them would be lying.
       */}
       <div className="audio-answer-send">
+        {/*
+          MCL-35. A recording made for a question that is no longer the one being asked is
+          still sendable, and this says so before the button rather than after it. The
+          alternative - hiding the button, or discarding the recording - would throw a
+          child's work away because an adult pressed something on another screen.
+        */}
+        {belongsElsewhere ? (
+          <p className="audio-answer-belongs" role="status">
+            {boundQuestionTitle === null
+              ? recordingBelongsToEarlierQuestionMessage
+              : recordingBelongsToMessage(boundQuestionTitle)}
+          </p>
+        ) : null}
+
         {hasRecording && !hasArrived ? (
           <button
             className="button button-primary"
-            disabled={isSending}
-            onClick={() => void sender.send(recording, questionId)}
+            // Disabled until the recording is bound, which is one render away: a send
+            // with no binding does nothing at all, so a button offered before then would
+            // be a button that silently did nothing.
+            disabled={isSending || boundQuestionId === null}
+            onClick={() => void sender.send(recording)}
             type="button"
           >
             <span aria-hidden="true">→</span>{" "}

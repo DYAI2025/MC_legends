@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { ADMIN_SESSION_COOKIE } from "@/adapters/http/admin-session-cookie";
 import { AdminAccessGate } from "@/app/components/admin-access-gate";
 import { AdminInboxView } from "@/app/components/admin-inbox-view";
+import { AdminQuestionBoard } from "@/app/components/admin-question-board";
 import { createAdminAccessGate } from "@/composition/server";
 
 /**
@@ -44,7 +45,23 @@ export default async function AdminPage() {
   return (
     <main className="page">
       <h1>Projekt-Postfach</h1>
-      {signedIn ? <AdminInboxView /> : <AdminAccessGate />}
+      {/*
+        MCL-35. The question board sits ABOVE the inbox on purpose: which question is
+        being asked decides what the next answers will be about, so it is the thing an
+        adult is here to decide, and the answers below are the consequence.
+
+        Both are behind the same single check. A second gate around one of them would be
+        a second chance to get the boundary wrong, and neither component is the boundary
+        anyway - the routes they read re-check the session on every request.
+      */}
+      {signedIn ? (
+        <>
+          <AdminQuestionBoard />
+          <AdminInboxView />
+        </>
+      ) : (
+        <AdminAccessGate />
+      )}
     </main>
   );
 }

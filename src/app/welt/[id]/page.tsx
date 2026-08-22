@@ -14,7 +14,9 @@ import {
   childStatusPresentationFor,
   childTopicLabelFor,
 } from "@/content/content-source";
-import { focusQuestion, openQuestionsAbout } from "@/content/open-questions";
+import { openQuestionsAbout, rotateQuestions } from "@/content/open-questions";
+import { questionUnavailableMessage } from "@/app/question-message";
+import { readQuestionSnapshot } from "@/app/question-rotation-source";
 
 type DetailProps = Readonly<{
   params: Promise<{ id: string }>;
@@ -56,9 +58,21 @@ export default async function WorldDetailPage(props: DetailProps) {
   const { idea, filter } = await readSelection(props);
   const status = childStatusPresentationFor(childStatusFor(idea.truthStatus));
   const backHref = overviewRoute(filter, idea.id);
-  const questions = openQuestionsAbout(idea.internalCategory);
   const neighbours = relatedIdeas(idea);
-  const focus = focusQuestion();
+
+  /*
+    MCL-35. Which questions about this element are still open is runtime state, and this
+    page has to read it for the same reason the overview does: without it, a detail page
+    would keep listing a question an adult retired and keep offering a button that leads
+    to a form for a different question entirely.
+
+    A store that cannot be read is NOT drawn as "nothing is open here" and NOT drawn from
+    the seeded dataset. Both would be this page inventing a fact out of its own failure.
+  */
+  const snapshot = await readQuestionSnapshot();
+  const rotation = snapshot === null ? null : rotateQuestions(snapshot);
+  const questions = snapshot === null ? [] : openQuestionsAbout(idea.internalCategory, snapshot);
+  const activeQuestionId = rotation?.active?.id ?? null;
 
   return (
     <main className="site-shell">
@@ -132,7 +146,12 @@ export default async function WorldDetailPage(props: DetailProps) {
           such section - an empty box promising a question that does not exist would be
           the same kind of lie this project keeps out of the status badges.
         */}
-        {questions.length === 0 ? null : (
+        {snapshot === null ? (
+          <section className="detail-questions" aria-labelledby="questions-heading">
+            <h2 id="questions-heading">{questionUnavailableMessage().title}</h2>
+            <p>{questionUnavailableMessage().body}</p>
+          </section>
+        ) : questions.length === 0 ? null : (
           <section className="detail-questions" aria-labelledby="questions-heading">
             <h2 id="questions-heading">Dazu ist noch etwas offen</h2>
             <ul>
@@ -144,7 +163,7 @@ export default async function WorldDetailPage(props: DetailProps) {
                     overview. Offering the others a button would send a child to a place
                     where nothing is waiting for them.
                   */}
-                  {question.id === focus.id ? (
+                  {question.id === activeQuestionId ? (
                     <Link className="button button-secondary" href={focusQuestionRoute(filter)}>
                       Diese Frage beantworten <span aria-hidden="true">→</span>
                     </Link>

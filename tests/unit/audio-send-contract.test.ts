@@ -134,13 +134,28 @@ afterEach(async () => {
   await rm(mediaDirectory, { recursive: true, force: true });
 });
 
+/**
+ * Binds a recording to its question and sends it, the way the recording area does: the
+ * question is chosen when the recording appears, and the send that follows carries no
+ * question at all. Two calls rather than one, because that separation is the fix - a
+ * helper that took both and passed both would be the old API wearing a different name.
+ */
+async function prepareAndSend(
+  sender: AudioAnswerSender,
+  recording: CapturedAudio,
+  questionId: string = QUESTION,
+): Promise<void> {
+  sender.prepare(recording, questionId);
+  await sender.send(recording);
+}
+
 describe("a recording sent from the browser reaches the real route", () => {
   it("stores the unchanged bytes and answers with a receipt the sender accepts", async () => {
     const requests: Request[] = [];
     const sender = senderWith(routedFetch((request) => requests.push(request)));
     const recording = capture(WEBM, "audio/webm;codecs=opus");
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
 
     const state = sender.snapshot();
     expect(state.phase).toBe("sent");
@@ -185,11 +200,11 @@ describe("a recording sent from the browser reaches the real route", () => {
 
     const recording = capture(WEBM, "audio/webm");
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(sender.snapshot().phase).toBe("failed");
     expect(sender.snapshot().failure).toBe("transport");
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
     expect(sender.snapshot().phase).toBe("sent");
 
     expect(attempts).toBe(2);
@@ -244,7 +259,7 @@ describe("a recording sent from the browser reaches the real route", () => {
     });
 
     const recording = capture(WEBM, "audio/webm");
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
 
     // 201 with a real receipt behind it: the recording IS durably stored right now, and
     // the client has no way to know it.
@@ -269,7 +284,7 @@ describe("a recording sent from the browser reaches the real route", () => {
     expect(sentence).not.toBe(audioSendFailureMessage("refused"));
     expect(sentence.toLowerCase()).not.toMatch(/nimm|such/u);
 
-    await sender.send(recording, QUESTION);
+    await prepareAndSend(sender, recording);
 
     expect(sender.snapshot().phase).toBe("sent");
     expect(attempts).toBe(2);
@@ -303,7 +318,7 @@ describe("a recording sent from the browser reaches the real route", () => {
 
     // A picked .mp3 whose browser label is a vendor spelling the route's allowlist does
     // not contain. Sniffing is what makes it arrive as `audio/mpeg` instead of a 400.
-    await sender.send(capture(MP3_ID3, "audio/mp3", "file"), QUESTION);
+    await prepareAndSend(sender, capture(MP3_ID3, "audio/mp3", "file"), QUESTION);
 
     expect(sender.snapshot().phase).toBe("sent");
     expect(requests[0].headers.get("content-type")).toBe("audio/mpeg");
@@ -330,7 +345,7 @@ describe("a recording sent from the browser reaches the real route", () => {
       return POST(request);
     });
 
-    await sender.send(capture(WEBM, "audio/webm"), QUESTION);
+    await prepareAndSend(sender, capture(WEBM, "audio/webm"), QUESTION);
 
     expect(sender.snapshot().phase).toBe("failed");
     expect(sender.snapshot().failure).toBe("unauthorized");
@@ -345,11 +360,11 @@ describe("a recording sent from the browser reaches the real route", () => {
     resetRateLimitersForTest();
 
     const sender = senderWith(routedFetch());
-    await sender.send(capture(WEBM, "audio/webm"), QUESTION);
+    await prepareAndSend(sender, capture(WEBM, "audio/webm"), QUESTION);
     expect(sender.snapshot().phase).toBe("sent");
 
     const second = senderWith(routedFetch());
-    await second.send(capture(MP3_ID3, "audio/mpeg"), QUESTION);
+    await prepareAndSend(second, capture(MP3_ID3, "audio/mpeg"), QUESTION);
 
     expect(second.snapshot().phase).toBe("failed");
     // Named apart from a refusal on purpose: this one is worth trying again in a minute,
@@ -366,7 +381,7 @@ describe("a recording sent from the browser reaches the real route", () => {
     resetRateLimitersForTest();
 
     const sender = senderWith(routedFetch());
-    await sender.send(capture(WEBM, "audio/webm"), QUESTION);
+    await prepareAndSend(sender, capture(WEBM, "audio/webm"), QUESTION);
 
     expect(sender.snapshot().phase).toBe("failed");
     expect(sender.snapshot().failure).toBe("refused");

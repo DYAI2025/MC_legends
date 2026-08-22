@@ -98,11 +98,24 @@ export type AudioAnswerSenderDependencies = Readonly<{
   now: () => Date;
 }>;
 
-/** One recording's identity on the wire, minted once and reused by every retry. */
+/**
+ * One recording's identity on the wire, minted once and reused by every retry.
+ *
+ * MCL-35 put `questionId` in here, and that is the whole of the rotation fix. It used to
+ * be a parameter of `send`, which meant every attempt re-stated which question the
+ * recording answered - so a recording captured while question A was being asked, sent
+ * after an adult closed A, went to the project as an answer to B. Nothing anywhere would
+ * have looked wrong: the child spoke about A, the project filed it under B.
+ *
+ * All four values are minted together and none of them can be changed afterwards, so
+ * "one captured recording, one answer" is a property of this object rather than a rule
+ * somebody has to keep at every call site.
+ */
 type SendIdentity = Readonly<{
   recording: CapturedAudio;
   submissionId: string;
   createdAt: string;
+  questionId: string;
 }>;
 
 export class AudioAnswerSender {
@@ -147,12 +160,64 @@ export class AudioAnswerSender {
     this.#identity?.recording === recording ? this.#identity.submissionId : null;
 
   /**
+   * Which question this recording answers, or null before it has been bound.
+   *
+   * The recording area uses it to say - in child-safe words and never as an id - that a
+   * recording belongs to a question that is no longer the one being asked. Tests use it
+   * to assert the binding directly instead of inferring it from a request body.
+   */
+  readonly boundQuestionIdFor = (recording: CapturedAudio): string | null =>
+    this.#identity?.recording === recording ? this.#identity.questionId : null;
+
+  /**
+   * Binds one recording to the question it answers, once.
+   *
+   * Called when the recording APPEARS, not when it is sent. A recording is an answer to
+   * the question a child was looking at while they spoke, and that is knowable at exactly
+   * one moment - any later reading of "the current question" is a different question that
+   * happens to be current.
+   *
+   * Idempotent for a given recording object, and deliberately so rather than
+   * defensively: the recorder calls it from an effect whose dependencies include the
+   * question, so rotation re-runs it - and it must do nothing. A second call with a
+   * different question is not an error and is not honoured; it is the exact event this
+   * method exists to absorb.
+   */
+  readonly prepare = (recording: CapturedAudio, questionId: string): void => {
+    if (this.#identity?.recording === recording) return;
+
+    this.#identity = {
+      recording,
+      submissionId: this.#dependencies.createId(),
+      createdAt: this.#dependencies.now().toISOString(),
+      questionId,
+    };
+
+    // A new recording invalidates whatever attempt was still open: its outcome is about
+    // something the child has moved on from, and publishing it would put a sentence about
+    // a thrown-away recording under the one they are looking at.
+    this.#generation += 1;
+
+    // Published, not merely stored, and that is what makes the binding visible to React:
+    // the identity is private state that no snapshot exposes, so without this the
+    // recording area would never re-render to find out that its send button may now be
+    // offered. The published state is `idle` for this recording, which is exactly what a
+    // recording that has never been sent is.
+    this.#publish({ ...idleState, recording });
+  };
+
+  /**
    * One deliberate attempt to send one recording.
+   *
+   * ONE parameter, and that is structural rather than tidy: there is no argument through
+   * which the question a child is looking at NOW could enter an attempt to send a
+   * recording they made earlier. A retry cannot re-aim a recording, because a retry has
+   * nothing to re-aim it with.
    *
    * Never throws and never rejects: a child pressing a button is not an error path, and
    * every outcome this can have is a state the recording area draws.
    */
-  readonly send = async (recording: CapturedAudio, questionId: string): Promise<void> => {
+  readonly send = async (recording: CapturedAudio): Promise<void> => {
     // A second press on the recording that is already on its way, or one that already
     // arrived. Both are the same answer: nothing to do. Compared against the recording as
     // well as the phase, because a child who threw one recording away mid-flight and made
@@ -160,6 +225,14 @@ export class AudioAnswerSender {
     if (this.#state.recording === recording) {
       if (this.#state.phase === "sending" || this.#state.phase === "sent") return;
     }
+
+    // Unreachable from the recording area, which does not offer the button until the
+    // recording is bound. Handled anyway, and handled by doing NOTHING: inventing a
+    // question here is the one mistake this whole redesign exists to make impossible, and
+    // refusing loudly would put a failure in front of a child about a button they were
+    // never shown.
+    const identity = this.#identity;
+    if (identity?.recording !== recording) return;
 
     const generation = ++this.#generation;
     this.#publish({ phase: "sending", failure: null, receipt: null, recording });
@@ -188,18 +261,17 @@ export class AudioAnswerSender {
       return;
     }
 
-    // Minted here, on the first attempt, and reused by every later one for the same
-    // recording. This is the whole of the ambiguous-timeout answer: the route is
-    // idempotent by submissionId, so a retry after an attempt that may or may not have
-    // landed converges on the receipt the server already minted instead of leaving a
-    // second copy of one answer behind.
-    const identity = this.#identityFor(recording);
-
+    // Everything on the wire comes from the identity minted when the recording appeared,
+    // and nothing from this call. That is the whole of the ambiguous-timeout answer AND of
+    // the rotation answer at once: the route is idempotent by submissionId, so a retry
+    // after an attempt that may or may not have landed converges on the receipt the server
+    // already minted - and it converges on it under the SAME question, whatever the page
+    // is asking by then.
     let receipt: ServerReceipt;
     try {
       receipt = await this.#inbox.deliver({
         submissionId: identity.submissionId,
-        questionId,
+        questionId: identity.questionId,
         createdAt: identity.createdAt,
         mimeType,
         bytes: recording.blob,
@@ -224,18 +296,6 @@ export class AudioAnswerSender {
     if (this.#state.phase !== "failed") return;
     this.#publish({ ...idleState, recording: this.#state.recording });
   };
-
-  #identityFor(recording: CapturedAudio): SendIdentity {
-    if (this.#identity?.recording !== recording) {
-      this.#identity = {
-        recording,
-        submissionId: this.#dependencies.createId(),
-        createdAt: this.#dependencies.now().toISOString(),
-      };
-    }
-
-    return this.#identity;
-  }
 
   async #sniff(blob: Blob): Promise<AudioMimeType | null> {
     const head = new Uint8Array(await blob.slice(0, SNIFF_BYTES).arrayBuffer());

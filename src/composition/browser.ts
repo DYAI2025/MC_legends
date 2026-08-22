@@ -1,12 +1,14 @@
 import { HttpAdminInboxClient } from "@/adapters/http/http-admin-inbox-client";
 import { HttpAudioAnswerInbox } from "@/adapters/http/http-audio-answer-inbox";
 import { HttpFamilySessionClient } from "@/adapters/http/http-family-session-client";
+import { HttpQuestionBoardClient } from "@/adapters/http/http-question-board-client";
 import { HttpSubmissionInbox } from "@/adapters/http/http-submission-inbox";
 import { AudioAnswerSender } from "@/adapters/media/audio-answer-sender";
 import { AudioCaptureController } from "@/adapters/media/audio-capture-controller";
 import { IndexedDbSubmissionRepository } from "@/adapters/persistence/indexeddb-submission-repository";
 import type { FamilySessionClient } from "@/application/access/family-session-client";
 import type { AdminInboxClient } from "@/application/submissions/admin-inbox-client";
+import type { QuestionBoardClient } from "@/application/questions/question-board-client";
 import type { SubmissionInbox } from "@/application/submissions/submission-inbox";
 import type { SubmissionRepository } from "@/application/submissions/submission-repository";
 
@@ -39,6 +41,20 @@ export function createBrowserFamilySessionClient(): FamilySessionClient {
  */
 export function createBrowserAdminSessionClient(): FamilySessionClient {
   return new HttpFamilySessionClient({ endpoint: "/api/admin/session" });
+}
+
+/**
+ * Reading and changing the question board from the browser (MCL-35).
+ *
+ * One client for both, because they are one capability behind one gate: whoever may see
+ * which questions are open is exactly whoever may close one. Splitting them would be two
+ * factories the composition root has to keep pointed at the same endpoint.
+ *
+ * It carries no credential of its own - the admin session is an HttpOnly cookie this code
+ * can never read - so nothing here reaches the client bundle that a script could steal.
+ */
+export function createBrowserQuestionBoardClient(): QuestionBoardClient {
+  return new HttpQuestionBoardClient();
 }
 
 /** Reading the protected inbox from the browser. Carries no credential of its own. */
