@@ -152,10 +152,27 @@ export class HttpAudioAnswerInbox implements AudioAnswerInbox {
 
     const receipt = readServerReceipt(body);
     if (receipt === null) {
-      // The one case this class exists to get right. A positive-looking answer without
-      // two real receipt fields must never become "Im Projekt angekommen", however
-      // cheerful its status code was.
-      throw new AudioAnswerInboxError("refused");
+      // The one case this class exists to get right - and the one that is easy to get
+      // wrong twice over.
+      //
+      // First half: a positive-looking answer without two real receipt fields must never
+      // become "Im Projekt angekommen", however cheerful its status code was. That much
+      // `readServerReceipt` returning null has already decided, and nothing below relaxes
+      // it - this method still produces no receipt, so no success is drawn.
+      //
+      // Second half, and MCL-30B review finding F1: this is NOT a refusal. A receipt-less
+      // 2xx proves exactly one thing - that THIS CLIENT holds no durable acknowledgement.
+      // It proves nothing about the server, which may already have written the blob, the
+      // row and a receipt that a proxy, a response rewrite, a truncated body or a contract
+      // regression then removed on the way back. Classifying that as `refused` hands the
+      // child the one sentence a retry cannot follow - record something new - and a child
+      // who obeys it files a SECOND answer for a recording the project already holds.
+      //
+      // `transport` is the honest reading and the retryable one: no usable answer reached
+      // us. It is the same answer this file gives a 2xx whose body will not parse, for the
+      // same reason, and the route's idempotency by submissionId is what makes the retry
+      // it invites converge on the receipt that may already exist rather than duplicate it.
+      throw new AudioAnswerInboxError("transport");
     }
 
     return receipt;

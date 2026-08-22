@@ -13,10 +13,19 @@ import { WEBM } from "../support/audio-fixtures";
  * The client half of the audio upload contract (MCL-30B).
  *
  * What this file pins is the half a green happy path never shows: which of the route's
- * four refusals became which named reason, and that a positive-looking answer without two
- * real receipt fields is NOT one. A child is told "im Projekt angekommen" from exactly one
+ * four refusals became which named reason, and what happens to an answer that looks
+ * positive and carries no receipt. A child is told "im Projekt angekommen" from exactly one
  * value in this codebase - a receipt - and the only place a fake one could be invented is
  * here, in the code that reads the answer.
+ *
+ * That last shape is graded twice, because it has two independent ways to be wrong and
+ * MCL-30B review finding F1 caught the second one:
+ *
+ * - it must never produce a receipt, so no arrival is ever drawn from it; and
+ * - it must not be reported as `refused` either. A receipt-less 2xx is a statement about
+ *   what this client KNOWS, not about what the server STORED, and `refused` is the one
+ *   reason whose sentence asks the child to record something new - which for a server that
+ *   did store the recording means a second answer for one spoken sentence.
  *
  * The header NAMES are asserted as literal strings on purpose. They are the contract with
  * a route this adapter cannot import, and a rename on one side has to fail here rather
@@ -155,22 +164,38 @@ describe("HttpAudioAnswerInbox", () => {
     await expect(reasonOf(inbox.deliver(DRAFT))).resolves.toBe(reason);
   });
 
-  it("refuses an answer that says yes without a receipt", async () => {
-    for (const body of [
-      { acknowledged: true },
-      { acknowledged: true, receiptId: "r-1" },
-      { acknowledged: true, receiptId: "   ", receivedAt: "2026-08-22T09:00:01.000Z" },
-      { acknowledged: true, receiptId: "r-1", receivedAt: "" },
-      { acknowledged: "true", receiptId: "r-1", receivedAt: "2026-08-22T09:00:01.000Z" },
-      { receiptId: "r-1", receivedAt: "2026-08-22T09:00:01.000Z" },
-      null,
-      "ok",
-    ]) {
-      const inbox = new HttpAudioAnswerInbox({
-        fetchImplementation: async () => jsonResponse(body, 201),
-      });
+  it("draws no arrival from an answer that says yes without a receipt", async () => {
+    for (const status of [200, 201] as const) {
+      for (const body of [
+        { acknowledged: true },
+        { acknowledged: true, receiptId: "r-1" },
+        { acknowledged: true, receiptId: "   ", receivedAt: "2026-08-22T09:00:01.000Z" },
+        { acknowledged: true, receiptId: "r-1", receivedAt: "" },
+        { acknowledged: "true", receiptId: "r-1", receivedAt: "2026-08-22T09:00:01.000Z" },
+        { receiptId: "r-1", receivedAt: "2026-08-22T09:00:01.000Z" },
+        {},
+        null,
+        "ok",
+      ]) {
+        const inbox = new HttpAudioAnswerInbox({
+          fetchImplementation: async () => jsonResponse(body, status),
+        });
 
-      await expect(reasonOf(inbox.deliver(DRAFT))).resolves.toBe("refused");
+        // Rejecting at all is the first property: none of these may resolve, because a
+        // resolved deliver() is the only thing in this codebase that can draw "Im Projekt
+        // angekommen". Both success statuses are exercised - 201 is a first upload, 200 is
+        // the answer to a submissionId the route already holds, and an intermediary can
+        // strip a receipt out of either.
+        await expect(reasonOf(inbox.deliver(DRAFT))).resolves.toBe(
+          // MCL-30B finding F1, and the second property. Not `refused`: the only thing
+          // proved here is that no acknowledgement got back to this browser. The server
+          // may hold the blob, the row and a receipt that a proxy, a response rewrite or a
+          // truncated body removed on the way. tests/unit/audio-send-contract.test.ts
+          // builds exactly that server and shows the retry this reason invites converging
+          // on the stored receipt instead of filing a duplicate.
+          "transport",
+        );
+      }
     }
   });
 

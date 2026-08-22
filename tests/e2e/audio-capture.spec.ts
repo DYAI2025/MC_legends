@@ -436,28 +436,86 @@ test.describe("child audio submission", () => {
     await expect(player(page)).toBeVisible();
   });
 
-  test("does not claim success when the project answers yes without a receipt", async ({ page }) => {
+  test("recovers when the project's yes came back without its receipt", async ({ page }) => {
     await stubMedia(page, "records");
     await signInAsFamily(page);
     await page.goto("/");
 
-    // A 201 that says acknowledged and carries nothing to back it up. This is the one
-    // shape an optimistic client would show a child as arrival.
-    await page.route(audioEndpoint, (route) =>
-      route.fulfill({
-        status: 201,
+    // MCL-30B review finding F1, in a real browser and against the real route.
+    //
+    // The request is NOT faked away: it reaches the handler, the recording is stored and a
+    // real receipt is minted. Only the answer is damaged on its way back to the page -
+    // still 201, still valid JSON, still saying yes, with the receipt fields removed, the
+    // way a proxy or a response rewrite removes them. That shape has exactly two ways to
+    // be wrong, and both would be invisible in a green happy path:
+    //
+    // - drawing "angekommen" from it, which would be a lie about a receipt nobody has; and
+    // - calling it a refusal, which would ask this child to record something new when the
+    //   project already holds what they said - one spoken answer, filed twice.
+    const submissionIds: string[] = [];
+    const statuses: number[] = [];
+    let mintedOnFirstAttempt = "";
+    let attempts = 0;
+    // Recorded here and asserted in the test body rather than inside the handler: an
+    // expectation that fails inside a route callback fails the run in a far less legible
+    // place than one that fails where the story is being told.
+    await page.route(audioEndpoint, async (route) => {
+      attempts += 1;
+      submissionIds.push(route.request().headers()["x-avaloria-submission-id"] ?? "");
+
+      const answer = await route.fetch();
+      statuses.push(answer.status());
+
+      if (attempts > 1) {
+        await route.fulfill({ response: answer });
+        return;
+      }
+
+      const body = (await answer.json()) as { receiptId?: unknown };
+      mintedOnFirstAttempt = typeof body.receiptId === "string" ? body.receiptId : "";
+
+      await route.fulfill({
+        status: answer.status(),
         contentType: "application/json",
         body: JSON.stringify({ acknowledged: true }),
-      }),
-    );
+      });
+    });
 
     const area = recorder(page);
     await area.getByRole("button", { name: startButton }).click();
     await area.getByRole("button", { name: stopButton }).click();
     await area.getByRole("button", { name: sendButton }).click();
 
-    await expect(area.getByRole("alert")).toHaveText(audioSendFailureMessage("refused"));
+    // Retryable, and never arrival. The sentence is the transport one, which invites
+    // another try - deliberately NOT the refusal sentence, which asks for a new recording.
+    await expect(area.getByRole("alert")).toHaveText(audioSendFailureMessage("transport"));
+    await expect(area.getByRole("alert")).not.toHaveText(audioSendFailureMessage("refused"));
     await expect(area).not.toContainText("angekommen");
+
+    // The first attempt really was stored: a 201 carrying a real receipt, which this page
+    // never got to see. Without this, the case above would be indistinguishable from a
+    // route that had refused the recording outright - and proving the difference is the
+    // entire reason this test drives the real handler instead of a stubbed answer.
+    expect(statuses).toEqual([201]);
+    expect(mintedOnFirstAttempt.length).toBeGreaterThan(0);
+
+    // The recording survived, and the way to send it again is right there.
+    await expect(player(page)).toBeVisible();
+    await expect(area.getByRole("button", { name: resendButton })).toBeEnabled();
+    expectChildSafe(await area.innerText(), "the recording area after a receipt-less yes");
+
+    await area.getByRole("button", { name: resendButton }).click();
+
+    // The retry carried the same identity into the same route, which answered with the
+    // record it already held - so the child ends up at the receipt the first attempt
+    // minted, and the project holds one answer rather than two.
+    await expect(area.getByText(audioSendPhaseMessage("sent"))).toBeVisible();
+    expect(attempts).toBe(2);
+    expect(submissionIds[0]).toBe(submissionIds[1]);
+    expect(submissionIds[0].length).toBeGreaterThan(0);
+    // 200 and not a second 201: the route created nothing this time, it recognised the
+    // submissionId and handed back the record it already had.
+    expect(statuses).toEqual([201, 200]);
   });
 
   test("does not claim success when the project cannot store the recording", async ({ page }) => {

@@ -44,13 +44,19 @@ export type AudioAnswerDraft = Readonly<{
  * would send a child back to a button that cannot work yet.
  *
  * - `transport` - no usable answer at all: offline, the deadline passed, the answer could
- *   not be read. Worth retrying, and the server may already hold the submission.
+ *   not be read, or it read as positive while carrying no receipt. Worth retrying, and the
+ *   server may already hold the submission. That last shape is MCL-30B finding F1: a
+ *   receipt-less 2xx is evidence about this CLIENT's knowledge, never about what the
+ *   server stored, so it belongs here with the other ambiguous outcomes and not below.
  * - `unavailable` - the project answered that it cannot take this right now. Retryable.
  * - `rate-limited` - too many uploads in a short time. Retryable after a pause.
  * - `unauthorized` - this browser has no valid family session any more. A retry needs a
  *   sign-in first, so offering a bare "try again" would be a lie.
- * - `refused` - the project answered and declined this recording. Sending the same bytes
- *   again will be declined again.
+ * - `refused` - the project answered and EXPLICITLY declined this recording, with a status
+ *   that says so. Sending the same bytes again will be declined again. Reserved for that:
+ *   an outcome that is merely unproven is a `transport`, because the sentence this reason
+ *   produces asks the child to record something new, and a child cannot un-send bytes the
+ *   server may already have kept.
  */
 export type AudioInboxFailureReason =
   | "transport"
