@@ -6,7 +6,7 @@ import {
   type QuestionState,
 } from "@/domain/questions/question-lifecycle";
 import {
-  QuestionLifecyclePayloadError,
+  assertStorableLifecycleRequest,
   type QuestionLifecycleEvent,
   type QuestionLifecycleLog,
   type QuestionLifecycleOutcome,
@@ -15,17 +15,6 @@ import {
 } from "@/application/questions/question-lifecycle";
 
 const FILE_NAME = "question-lifecycle.jsonl";
-
-/**
- * Mirrors `question_lifecycle_question_id_length` in migration 0003.
- *
- * Duplicated on purpose, exactly as the inbox adapters duplicate their caps: this
- * adapter is the rollback path, and a rollback that quietly relaxes a limit the durable
- * store enforces is the MCL-49 F1 failure all over again - the same request refused in
- * production and accepted after a rollback, at the moment somebody is already dealing
- * with a problem.
- */
-const MAX_QUESTION_ID_LENGTH = 200;
 
 /**
  * One queue per directory, shared by every instance in this process.
@@ -128,7 +117,7 @@ export class FileQuestionLifecycleLog implements QuestionLifecycleLog, QuestionL
   constructor(private readonly directory: string) {}
 
   async append(request: QuestionLifecycleRequest): Promise<QuestionLifecycleOutcome> {
-    assertStorable(request);
+    assertStorableLifecycleRequest(request);
 
     return serialize(this.directory, async () => {
       const events = await this.readAll();
@@ -259,32 +248,5 @@ export class FileQuestionLifecycleLog implements QuestionLifecycleLog, QuestionL
     }
 
     return events;
-  }
-}
-
-/**
- * What no store will ever hold, refused before anything is read or written.
- *
- * Mirrors migration 0003's CHECK constraints, so both adapters refuse the same requests
- * and the shared contract can pin it. `QuestionLifecyclePayloadError` rather than a bare
- * throw, because the route answers the two differently: a request no retry can fix ends
- * as 400, everything else is a 503 the caller is invited to try again.
- */
-function assertStorable(request: QuestionLifecycleRequest): void {
-  if (request.expectedState === request.nextState) {
-    throw new QuestionLifecyclePayloadError(
-      "a lifecycle change must move the question to a different state",
-    );
-  }
-
-  const { questionId } = request;
-
-  if (
-    questionId.trim().length === 0 ||
-    questionId.length > MAX_QUESTION_ID_LENGTH ||
-    questionId.includes("\u0000") ||
-    !questionId.isWellFormed()
-  ) {
-    throw new QuestionLifecyclePayloadError("the question id cannot be stored");
   }
 }

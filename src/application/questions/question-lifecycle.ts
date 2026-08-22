@@ -86,6 +86,52 @@ export class QuestionLifecyclePayloadError extends Error {
   }
 }
 
+/**
+ * Mirrors `question_lifecycle_question_id_length` in migration 0003.
+ *
+ * The number is duplicated in the schema on purpose - the limits belong where durability
+ * does - but the CHECK it mirrors is only one of the two things a request has to satisfy,
+ * and the other one has no SQL equivalent at all (see below).
+ */
+const MAX_QUESTION_ID_LENGTH = 200;
+
+/**
+ * What no store will ever hold, refused before any adapter reads or writes anything.
+ *
+ * On the port rather than in each adapter, because the two adapters would otherwise
+ * disagree about it and the disagreement would be invisible: PostgreSQL refuses an
+ * over-long id with a CHECK violation and a JSONL file refuses nothing at all, which is
+ * exactly the asymmetry MCL-49 already paid for once - the same request rejected in
+ * production and accepted after a rollback. A blank id has no SQL equivalent even in the
+ * database branch, so stating it here is the only place it can be stated once.
+ *
+ * `QuestionLifecyclePayloadError` rather than a bare throw: the route answers the two
+ * differently, and a request no retry can fix must not be reported as an outage the
+ * caller is invited to retry forever.
+ */
+export function assertStorableLifecycleRequest(request: QuestionLifecycleRequest): void {
+  if (request.expectedState === request.nextState) {
+    throw new QuestionLifecyclePayloadError(
+      "a lifecycle change must move the question to a different state",
+    );
+  }
+
+  const { questionId } = request;
+
+  if (
+    questionId.trim().length === 0 ||
+    questionId.length > MAX_QUESTION_ID_LENGTH ||
+    questionId.includes("\u0000") ||
+    !questionId.isWellFormed()
+  ) {
+    // The two shapes that survive every other check and still cannot be stored: a NUL,
+    // which PostgreSQL refuses outright (22021), and a lone surrogate, which
+    // node-postgres silently rewrites to U+FFFD - storing an id that is not the id that
+    // was sent. Refused, never repaired.
+    throw new QuestionLifecyclePayloadError("the question id cannot be stored");
+  }
+}
+
 /** The write side. Only the protected adult surface is ever handed one of these. */
 export interface QuestionLifecycleLog {
   append(request: QuestionLifecycleRequest): Promise<QuestionLifecycleOutcome>;
