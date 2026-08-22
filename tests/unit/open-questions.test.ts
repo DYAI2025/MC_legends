@@ -131,10 +131,21 @@ describe("open questions about an element", () => {
     );
   });
 
+  it("skips a question the lifecycle store has closed, even though the dataset seeds it open", () => {
+    const seededOpen = openQuestions[0];
+    expect(seededOpen.state).toBe("open");
+
+    expect(
+      openQuestionsAbout(seededOpen.internalCategory, {
+        [seededOpen.id]: { state: "closed", sequence: 1 },
+      }).map((question) => question.id),
+    ).not.toContain(seededOpen.id);
+  });
+
   it("skips a closed question", () => {
     const closed = { ...openQuestions[0], id: "closed-fixture", state: "closed" as const };
     expect(
-      openQuestionsAbout(closed.internalCategory, [closed]).map((question) => question.id),
+      openQuestionsAbout(closed.internalCategory, {}, [closed]).map((question) => question.id),
     ).not.toContain("closed-fixture");
   });
 });
