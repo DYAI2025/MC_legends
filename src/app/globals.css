@@ -117,6 +117,16 @@ textarea::placeholder { color: #9aa69c; }
 .audio-answer-preview { margin-top: 14px; }
 .audio-answer-player { display: block; max-width: 100%; width: 380px; }
 .audio-answer-filename { color: var(--muted); font-size: .78rem; font-weight: 700; margin: 8px 0 0; overflow-wrap: anywhere; }
+/* MCL-30B: sending a recording. The empty state line keeps the live region in the
+   document before there is anything to announce, so it collapses rather than reserving
+   a band of whitespace under the preview. */
+.audio-answer-send { margin-top: 16px; }
+.audio-answer-send-state { background: #fffdf7; border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 12px; font-size: .84rem; font-weight: 800; margin: 12px 0 0; padding: 11px 14px; }
+.audio-answer-send-state:empty { border: 0; margin: 0; padding: 0; }
+.audio-answer-send-state-sending { border-left-color: #c28b23; }
+.audio-answer-send-state-sent { border-left-color: #4a824a; }
+.audio-answer-send-state-failed { border-left-color: #c0392b; }
+.audio-answer-send-problem { background: #fff; border: 1px solid #f0ddb0; border-radius: 12px; color: var(--ink); font-size: .84rem; line-height: 1.5; margin: 10px 0 0; padding: 11px 14px; }
 .audio-answer-file { margin-top: 18px; }
 .audio-answer-file input { background: #fffdf7; border: 1px solid #e6d8b3; border-radius: 12px; color: var(--ink); font: inherit; font-size: .84rem; padding: 11px; width: 100%; }
 .audio-answer-file input:focus-visible { outline: 3px solid #e3ad38; outline-offset: 3px; }
@@ -194,6 +204,7 @@ textarea::placeholder { color: #9aa69c; }
   .question-card { grid-template-columns: 1fr; gap: 20px; padding: 24px; }
   .question-art { height: 68px; width: 68px; font-size: 2.7rem; }
   .audio-answer-controls .button { width: 100%; }
+  .audio-answer-send .button { width: 100%; }
   .audio-answer-player { width: 100%; }
   .my-ideas-section { padding-bottom: 76px; padding-top: 48px; }
   .footer { flex-direction: column; gap: 8px; }

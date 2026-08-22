@@ -1,6 +1,8 @@
 import { HttpAdminInboxClient } from "@/adapters/http/http-admin-inbox-client";
+import { HttpAudioAnswerInbox } from "@/adapters/http/http-audio-answer-inbox";
 import { HttpFamilySessionClient } from "@/adapters/http/http-family-session-client";
 import { HttpSubmissionInbox } from "@/adapters/http/http-submission-inbox";
+import { AudioAnswerSender } from "@/adapters/media/audio-answer-sender";
 import { AudioCaptureController } from "@/adapters/media/audio-capture-controller";
 import { IndexedDbSubmissionRepository } from "@/adapters/persistence/indexeddb-submission-repository";
 import type { FamilySessionClient } from "@/application/access/family-session-client";
@@ -54,4 +56,22 @@ export function createBrowserAdminInboxClient(): AdminInboxClient {
  */
 export function createBrowserAudioCaptureController(): AudioCaptureController {
   return new AudioCaptureController();
+}
+
+/**
+ * MCL-30B: one send machine for one mounted recording area, wired to the same-origin
+ * audio inbox. A factory for the same reason the capture controller is one - the
+ * submissionId it mints belongs to the recording in front of one child, and a shared
+ * instance would hand a second recording area the first one's identity.
+ *
+ * The two dependencies are injected rather than reached for, so the whole send machine
+ * runs in a test without a clock and without a random number generator: a stable
+ * submissionId across retries is the property that has to be provable, and it cannot be
+ * proved against a value the module invents for itself.
+ */
+export function createBrowserAudioAnswerSender(): AudioAnswerSender {
+  return new AudioAnswerSender(new HttpAudioAnswerInbox(), {
+    createId: () => crypto.randomUUID(),
+    now: () => new Date(),
+  });
 }

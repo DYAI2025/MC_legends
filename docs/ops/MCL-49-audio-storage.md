@@ -49,9 +49,14 @@ $ docker inspect mc-legends --format '{{range .Mounts}}{{.Source}} -> {{.Destina
 > AC2 and AC9 forbid: the first redeploy would take every recording with it, silently and
 > irreversibly.
 >
-> Nothing has been lost yet, because no client sends audio (the browser send path is
-> MCL-30B). **This must be set before the first recording is accepted in production.** The
-> step is in `docs/deploy/vps-mc-legends.md` §5.1.
+> Nothing has been lost yet only because nothing has been sent yet. **That safety margin
+> ends with MCL-30B**, which wires the child UI to this route: from the moment that branch
+> is deployed, every recording a child sends lands in the container's writable layer and the
+> next redeploy destroys it, silently and irreversibly. **`AVALORIA_MEDIA_DIR` must be set
+> to `/data/media` on the container, and `/opt/mc-legends/data/media` must exist on the
+> host, BEFORE the MCL-30B build is deployed** — not before the first recording is noticed.
+> The step is in `docs/deploy/vps-mc-legends.md` §5.1, and MCL-64 owns the runtime gate that
+> proves it.
 
 `/opt/mc-legends/data/media` does not exist on the host yet; `ls -la /opt/mc-legends/data`
 showed only `inbox/` on 2026-08-21.
@@ -183,6 +188,33 @@ writing one directory can both read "absent" and both append. The durable answer
 PostgreSQL primary key. What makes a concurrent double *blob* write harmless is content
 addressing plus the atomic temp-write-fsync-rename-fsync, not locking.
 
+### 7.1 The browser side of the same contract (MCL-30B)
+
+The client half is `HttpAudioAnswerInbox` (`src/adapters/http/http-audio-answer-inbox.ts`),
+driven by `AudioAnswerSender` (`src/adapters/media/audio-answer-sender.ts`). Five decisions
+in it are what make the retry semantics above reachable from a child's browser:
+
+| Decision | Why |
+|---|---|
+| **One `submissionId` per recording, not per press** | Minted on the first attempt and keyed to the captured object's identity. It is what makes the convergence above happen: after an ambiguous failure the retry carries the same id, so the route answers `200` with the receipt it already minted instead of filing a second answer. Re-recording or picking a different file mints a new one. |
+| **The declared type is sniffed, not read off the Blob** | The route refuses a request whose declared `content-type` disagrees with what it sniffs from the bytes. A browser labels a recording `audio/webm;codecs=opus` and a picked file `audio/x-m4a`, `audio/mp3` or nothing at all — none of which are allowlist members. The client runs the domain's own `sniffAudioMimeType` over the first 16 bytes, so the two sides agree by construction. |
+| **Upload deadline 120 s, not the text inbox's 10 s** | 8 MiB in 10 s needs 6.7 Mbit/s of upload. 120 s tolerates roughly 0.6 Mbit/s at the ceiling. It is a *total* deadline, not an idle one — fetch offers no upload-progress signal without duplex streaming — so a slower uplink ends as a retryable failure with the recording still in hand. |
+| **`sent` is reachable only from a receipt** | `readServerReceipt` (`src/adapters/http/server-receipt.ts`) is the single definition of an acknowledgement for both inboxes. A `200`/`201` that says `acknowledged: true` without two non-blank receipt fields is **not an arrival** — the client holds no receipt, so nothing draws "Im Projekt angekommen". |
+| **A receipt-less `2xx` is ambiguous, not a refusal** (MCL-30B review finding F1) | It is classified `transport`, alongside a timeout and an unreadable body, and never `refused`. All it proves is that *this client* got no acknowledgement; the server may already hold the blob, the row and a receipt that a proxy, a response rewrite or a truncated body removed on the way back. `refused` is the one reason whose child-facing sentence asks for a **new** recording, so using it here would file a second answer for one spoken sentence. `transport` invites the retry that the same `submissionId` makes converge on the stored receipt. Proven end-to-end against the real route in `tests/unit/audio-send-contract.test.ts` ("came back stripped of its receipt") and in a real browser in `tests/e2e/audio-capture.spec.ts`. |
+
+**Known limitation, deliberate and recorded rather than fixed:** a finished recording that
+has not been sent lives only in the page's memory. An ordinary re-render or a topic change
+keeps it (pinned by an e2e case); a reload, a tab close or a hard navigation loses it. This
+slice does not persist audio bytes to IndexedDB — that would be an offline-sync subsystem
+nobody has asked for, and the child-facing note in the recording area says plainly that the
+recording is gone if the page is reloaded before it is sent.
+
+**Second known limitation:** discarding a recording while its upload is in flight does not
+un-send it. The bytes may already have reached the route, in which case a row exists for a
+recording the child threw away. The recording area therefore disables *discard* and
+*re-record* for the duration of an attempt, so the only way to reach that state is a
+connection that outlives the page.
+
 ---
 
 ## 8. Backup obligations
@@ -298,9 +330,11 @@ alone. Re-read `df -h /` before enabling uploads and again after the first month
 
 ## 12. What this document does not claim
 
-- **No recording has ever been stored in production.** The browser send path is MCL-30B;
-  nothing in the child UI posts to the audio route yet. Everything above is proven by the
-  test suite and by the deployment facts measured on 2026-08-21, not by production traffic.
+- **No recording has ever been stored in production.** MCL-30B wires the child UI to this
+  route, so the code path now exists end to end; whether it has ever run against the
+  production host is a separate question this document does not answer. Everything above is
+  proven by the test suite and by the deployment facts measured on 2026-08-21, not by
+  production traffic.
 - **AC2 and AC9 are not runtime-proven.** They need `AVALORIA_MEDIA_DIR` set to the bind
   mount (§2) and a redeploy-and-restart cycle with a real recording present.
 - **Retention is undecided** (§6) and deliberately unimplemented.
