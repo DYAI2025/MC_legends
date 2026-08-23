@@ -1,4 +1,17 @@
-# syntax = docker/dockerfile:1
+# No `# syntax=` directive here on purpose (MCL-64).
+#
+# Coolify PREPENDS its own `# syntax=docker/dockerfile:1` when an application is built
+# with build secrets, and BuildKit accepts exactly one parser directive:
+#
+#   ERROR: failed to build: failed to solve: only one syntax parser directive can be used
+#
+# Measured on the VPS 2026-08-23 - the deploy failed at `docker build` in 40 seconds.
+# Build secrets are what keep AVALORIA_* values out of the image`s build history; with
+# them off, Coolify passes every variable as an ARG and `docker history` then contains
+# the session secret and both access codes in clear.
+#
+# Nothing here needs a pinned frontend: this file uses no BuildKit-only syntax (no
+# `RUN --mount`, no `COPY --link`, no heredocs), and BuildKit is the default builder.
 
 # Adjust NODE_VERSION as desired
 ARG NODE_VERSION=24.18.1
