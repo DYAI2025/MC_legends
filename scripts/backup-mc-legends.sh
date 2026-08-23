@@ -71,6 +71,37 @@ MEDIA_MANIFEST="$SET/media-$STAMP.sha256"
 
 mkdir -p "$SET"
 
+# --------------------------------------------------------------------------------------
+# Outcome recording (MCL-65)
+# --------------------------------------------------------------------------------------
+# Written from an EXIT trap so a run that dies half-way still records its failure instead
+# of leaving silence. Silence is the state scripts/check-backup-freshness.sh exists to
+# condemn, and it can only tell "no run happened" from "a run failed" if the failed run
+# says so itself - which it cannot do from a line it never reached.
+#
+#   last-run.status   one line, `<stamp> ok` or `<stamp> FAILED exit=<code>` - the
+#                     interface check-backup-freshness.sh consumes
+#   runs.log          append-only history of the same lines, for diagnosis
+#
+# The notification is macOS-only by feature test and best-effort: it carries the stamp
+# and the exit code, never a secret or any submission content, and a notification that
+# cannot be posted must not turn a recorded failure into a crash inside the trap.
+record_outcome() {
+  local code=$?
+  local line
+  if [ "$code" -eq 0 ]; then
+    line="$STAMP ok"
+  else
+    line="$STAMP FAILED exit=$code"
+  fi
+  printf '%s\n' "$line" > "$DEST/last-run.status" || true
+  printf '%s %s\n' "$(date -u +%FT%TZ)" "$line" >> "$DEST/runs.log" || true
+  if [ "$code" -ne 0 ] && command -v osascript >/dev/null 2>&1; then
+    osascript -e "display notification \"run $STAMP failed with exit $code - see runs.log\" with title \"MCL backup FAILED\"" >/dev/null 2>&1 || true
+  fi
+}
+trap record_outcome EXIT
+
 # BatchMode=yes so an unattended run fails immediately instead of hanging forever on a
 # passphrase or host-key prompt that nobody is sitting there to answer.
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=15 "$VPS")
