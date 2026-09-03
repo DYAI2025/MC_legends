@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 
-const ignoredDirectories = new Set([".git", ".next", ".validation", "node_modules", "coverage", "playwright-report", "test-results"]);
+const ignoredDirectories = new Set([".claude", ".git", ".next", ".validation", "node_modules", "coverage", "playwright-report", "test-results"]);
 const textExtensions = new Set([".md", ".json", ".ts", ".tsx", ".mjs", ".js", ".css", ".yml", ".yaml", ".txt"]);
 
 const rules = [
