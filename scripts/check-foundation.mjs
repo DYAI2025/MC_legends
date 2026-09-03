@@ -102,7 +102,7 @@ async function walk(directory) {
   return nested.flat();
 }
 
-const textFiles = (await walk(".")).filter((path) => !path.includes("/.git/") && !path.includes("node_modules"));
+const textFiles = (await walk(".")).filter((path) => !path.includes("/.claude/") && !path.includes("/.git/") && !path.includes("node_modules"));
 const forbidden = [/Hogwarts Legacy/i, /Harry Potter/i];
 for (const path of textFiles) {
   if (!/\.(md|json|ts|tsx|mjs|css|yml|yaml|txt)$/.test(path)) continue;
