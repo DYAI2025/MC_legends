@@ -1,5 +1,3 @@
-PASTE-TEST-LINE-1
-PASTE-TEST-LINE-2
 # Sprint 678 "Kinder-Werkbank" (MCL Sprint 3) — Sprint Plan and Implementation Plan
 
 > **For Claude / Codex:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement the story sections (§7–§13) task-by-task, one story per work branch and PR. Sections §1–§6 and §14–§19 are the Product Owner's sprint contract and are not executed by an agent.
