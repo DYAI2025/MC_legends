@@ -18,9 +18,11 @@ import {
  * nothing on its own - the server is the authority and its reason is what is displayed -
  * but it shows the boundary while there is still time to stay inside it.
  *
- * The history is loaded lazily, once per expanded card rather than once per page. An
- * inbox of two hundred submissions must not open two hundred requests to show a list
- * nobody has scrolled to.
+ * The history is loaded when the panel is OPENED, not when the card renders. Measured:
+ * loading it on mount turned one admin page load into one request per submission - two
+ * hundred cards, two hundred requests, for histories nobody had scrolled to - and it
+ * perturbed the debounce measurement in admin-inbox.spec.ts enough to make that test
+ * flaky. The panel is collapsed by default and fetches once when it is first expanded.
  */
 
 const MAX_UNDERSTOOD = 400;
@@ -32,6 +34,7 @@ export type AdminReplyFormProps = Readonly<{
 }>;
 
 export function AdminReplyForm({ client, submissionId }: AdminReplyFormProps) {
+  const [open, setOpen] = useState(false);
   const [history, setHistory] = useState<readonly SubmissionReply[]>([]);
   const [understood, setUnderstood] = useState("");
   const [question, setQuestion] = useState("");
@@ -39,6 +42,8 @@ export function AdminReplyForm({ client, submissionId }: AdminReplyFormProps) {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!open) return;
+
     let cancelled = false;
 
     void client.list(submissionId).then((result) => {
@@ -49,7 +54,7 @@ export function AdminReplyForm({ client, submissionId }: AdminReplyFormProps) {
     return () => {
       cancelled = true;
     };
-  }, [client, submissionId]);
+  }, [client, open, submissionId]);
 
   async function send(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -84,7 +89,17 @@ export function AdminReplyForm({ client, submissionId }: AdminReplyFormProps) {
 
   return (
     <div className="admin-reply">
-      <h4>Antwort an das Kind</h4>
+      <button
+        aria-expanded={open}
+        className="button button-secondary"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        Antwort an das Kind
+      </button>
+
+      {!open ? null : (
+        <>
 
       {history.length === 0 ? null : (
         <ul className="admin-reply-history">
@@ -129,12 +144,14 @@ export function AdminReplyForm({ client, submissionId }: AdminReplyFormProps) {
         </div>
       </form>
 
-      {message === null ? null : (
-        // role="status" rather than an alert: a refusal is information an adult acts on,
-        // not an emergency, and this panel already sits where they are looking.
-        <p className="admin-reply-message" role="status">
-          {message}
-        </p>
+          {message === null ? null : (
+            // role="status" rather than an alert: a refusal is information an adult acts
+            // on, not an emergency, and this panel already sits where they are looking.
+            <p className="admin-reply-message" role="status">
+              {message}
+            </p>
+          )}
+        </>
       )}
     </div>
   );

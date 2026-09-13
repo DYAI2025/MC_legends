@@ -151,3 +151,20 @@ export function replyAnswerToggleLabel(): string {
 export function replyAnswerFieldLabel(): string {
   return "Deine Antwort";
 }
+
+/** The submit button on a reply card's answer form. */
+export function replyAnswerSubmitLabel(): string {
+  return "Antwort speichern";
+}
+
+/**
+ * The submit button while the answer is on its way.
+ *
+ * In the table rather than inline in the component, and not for tidiness: a string a
+ * child reads that is authored inside JSX is a string no test iterates, so it is checked
+ * by nobody for jargon, for a timescale promise, or for claiming the project adopted
+ * their idea. This one was exactly that until an adversarial review found it.
+ */
+export function replyAnswerSendingLabel(): string {
+  return "Wird gesendet …";
+}

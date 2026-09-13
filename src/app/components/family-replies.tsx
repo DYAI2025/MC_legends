@@ -12,6 +12,8 @@ import {
   replyLoadingMessage,
   replyQuestionLead,
   replyAnswerFieldLabel,
+  replyAnswerSendingLabel,
+  replyAnswerSubmitLabel,
   replyAnswerToggleLabel,
   replyReadAloudLabel,
   replySectionHeading,
@@ -57,9 +59,24 @@ export type FamilyRepliesProps = Readonly<{
    * mean something slightly different.
    */
   onAnswer?: (questionId: string, text: string) => Promise<string>;
+  /**
+   * MCL-74. Which of this household's submissions now have a reply.
+   *
+   * Lifted out rather than kept here, because the list that needs it - "Meine Ideen" -
+   * lives one level up and holds only this browser's own text ideas. Without it that
+   * list has no way to offer the jump down to the answer, and `replyJumpLabel()` would
+   * be copy that exists, is tested, and is rendered nowhere.
+   */
+  onAnsweredSubmissions?: (submissionIds: readonly string[]) => void;
 }>;
 
-export function FamilyReplies({ client, reader, pollIntervalMs, onAnswer }: FamilyRepliesProps) {
+export function FamilyReplies({
+  client,
+  reader,
+  pollIntervalMs,
+  onAnswer,
+  onAnsweredSubmissions,
+}: FamilyRepliesProps) {
   // Which card is open, which one is sending, and what it was told. Keyed by reply id so
   // two cards cannot share a state - opening the second must not close the first or
   // move the first card's message under it.
@@ -79,7 +96,8 @@ export function FamilyReplies({ client, reader, pollIntervalMs, onAnswer }: Fami
     }
 
     setReplies(result.replies);
-  }, [client]);
+    onAnsweredSubmissions?.(result.replies.map((view) => view.reply.submissionId));
+  }, [client, onAnsweredSubmissions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,7 +253,9 @@ export function FamilyReplies({ client, reader, pollIntervalMs, onAnswer }: Fami
                     />
                     <div className="form-footer">
                       <button className="button" disabled={sendingId !== null} type="submit">
-                        {sendingId === view.reply.replyId ? "Wird gesendet …" : "Antwort speichern"}
+                        {sendingId === view.reply.replyId
+                          ? replyAnswerSendingLabel()
+                          : replyAnswerSubmitLabel()}
                       </button>
                     </div>
                   </form>

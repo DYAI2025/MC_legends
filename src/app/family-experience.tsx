@@ -21,7 +21,7 @@ import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
 import { FamilyReplies } from "@/app/components/family-replies";
-import { answerToReplyMessage } from "@/app/reply-message";
+import { answerToReplyMessage, replyJumpLabel } from "@/app/reply-message";
 import {
   allIdeasFilter,
   avaloriaIdeas,
@@ -108,6 +108,7 @@ export function FamilyExperience({
   const [isSaving, setIsSaving] = useState(false);
   const [submissions, setSubmissions] = useState<readonly TextSubmission[]>([]);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [answeredIds, setAnsweredIds] = useState<ReadonlySet<string>>(new Set());
   // Keyed by submission id so a retry's outcome is shown at the entry it belongs to,
   // not in the form's status line far above the button the child actually pressed.
   const [retryMessages, setRetryMessages] = useState<Readonly<Record<string, string | undefined>>>(
@@ -271,6 +272,21 @@ export function FamilyExperience({
    * the same local-first save, the same receipt requirement and the same child-facing
    * sentences as every other answer, so "angekommen" cannot come to mean two things.
    */
+  /*
+    MCL-74. Which of this browser's own ideas have an answer waiting.
+
+    Held here rather than inside the reply section, because "Meine Ideen" is the list that
+    needs it and it lives here. A Set rather than an array: this is a membership question
+    asked once per rendered idea.
+  */
+  const noteAnswered = useCallback((submissionIds: readonly string[]) => {
+    setAnsweredIds((current) => {
+      const next = new Set(submissionIds);
+      if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
+      return next;
+    });
+  }, []);
+
   async function sendReplyAnswer(questionId: string, text: string): Promise<string> {
     try {
       const saved = await submitText({ questionId, originalText: text }, repository, {
@@ -569,6 +585,16 @@ export function FamilyExperience({
                   <p className={`my-idea-status ${arrived ? "my-idea-arrived" : "my-idea-local"}`}>
                     {submissionStatusLabel(submission.status)}
                   </p>
+                  {/*
+                    MCL-74. Only for an idea that really has an answer. A link on every
+                    entry would send a child to an empty section and teach them the link
+                    means nothing.
+                  */}
+                  {answeredIds.has(submission.id) ? (
+                    <a className="my-idea-reply-link" href={`#antwort-${submission.id}`}>
+                      {replyJumpLabel()} <span aria-hidden="true">↓</span>
+                    </a>
+                  ) : null}
                   {arrived ? null : (
                     <button
                       className="button button-secondary"
@@ -607,6 +633,7 @@ export function FamilyExperience({
         <FamilyReplies
           client={replyClient}
           onAnswer={sendReplyAnswer}
+          onAnsweredSubmissions={noteAnswered}
           reader={spokenTextReader}
         />
       ) : null}

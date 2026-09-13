@@ -10,7 +10,6 @@ import { ADMIN_SESSION_COOKIE } from "@/adapters/http/admin-session-cookie";
 import { FAMILY_SESSION_COOKIE } from "@/adapters/http/family-session-cookie";
 import { resetRateLimitersForTest } from "@/composition/server";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
-import { expectChildSafe } from "../support/child-safe";
 
 /**
  * MCL-74. What a child's browser is allowed to learn from this route.
@@ -107,15 +106,9 @@ describe("GET /api/family/replies", () => {
     if (entry === undefined) throw new Error("expected one reply");
 
     expect(Object.keys(entry).toSorted()).toEqual(["reply", "submission"]);
-    expect(Object.keys(entry.reply).toSorted()).toEqual([
-      "author",
-      "createdAt",
-      "understood",
-      "question",
-      "questionId",
-      "replyId",
-      "submissionId",
-    ].toSorted());
+    expect(Object.keys(entry.reply).toSorted()).toEqual(
+      ["createdAt", "understood", "question", "questionId", "replyId", "submissionId"].toSorted(),
+    );
     expect(Object.keys(entry.submission).toSorted()).toEqual([
       "createdAt",
       "kind",
@@ -126,17 +119,15 @@ describe("GET /api/family/replies", () => {
     // An adult's word for an adult's problem. A child's page has no use for it, and the
     // day a fallback exists it must not be the thing that tells a child it is one.
     expect(entry.reply).not.toHaveProperty("status");
+    /*
+      `author` too, and it is the sharper of the pair. The reader already excludes
+      `fallback`, but {author: "llm", status: "ready"} is a shape MCL-76 will legitimately
+      write - and shipping the field would put "a machine wrote this" in the browser of a
+      child whose card says "Papa hat geantwortet".
+    */
+    expect(entry.reply).not.toHaveProperty("author");
   });
 
-  it("keeps every string it hands a child free of project jargon", async () => {
-    const response = await GET(get());
-    const body = (await response.json()) as {
-      replies: { reply: { understood: string; question: string } }[];
-    };
-    for (const entry of body.replies) {
-      expectChildSafe(`${entry.reply.understood} ${entry.reply.question}`, "family reply payload");
-    }
-  });
 
   it("refuses a browser with no family session, and says nothing about the replies", async () => {
     const response = await GET(new Request(ENDPOINT, { method: "GET" }));

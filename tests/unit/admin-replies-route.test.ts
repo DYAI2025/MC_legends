@@ -9,6 +9,7 @@ import { ADMIN_SESSION_COOKIE } from "@/adapters/http/admin-session-cookie";
 import { FAMILY_SESSION_COOKIE } from "@/adapters/http/family-session-cookie";
 import { resetRateLimitersForTest } from "@/composition/server";
 import { TEST_FAMILY_ACCESS_CODE } from "../support/family-access-code";
+import { childForbiddenVocabulary } from "../support/child-safe";
 
 /**
  * MCL-74. Writing a reply, and who may.
@@ -154,6 +155,41 @@ describe("POST .../replies", () => {
     const raw = await response.text();
     expect(JSON.parse(raw)).toEqual({ error: "invalid-payload", reason: "blocked-name" });
     expect(raw).not.toContain(BLOCKED_NAME);
+  });
+
+  it("refuses the technical words a child must never hear, not only project jargon", async () => {
+    /*
+      The failure this pins, found by an adversarial review of MCL-74: the route passed
+      only `childUnsafeVocabulary` to composeReply, while `expectChildSafe` - the rule
+      every authored child-facing string is held to - is that list PLUS transport words
+      and status codes. So an adult writing "Beim Senden gab es einen Timeout" produced a
+      201, and a child heard it read aloud. The two lists are now one export.
+    */
+    const response = await POST(
+      post("sub-1", {
+        understood: "Beim Senden gab es einen Timeout und einen Stack.",
+        question: "War das Problem der Fetch oder der Fehler 503?",
+      }),
+      params("sub-1"),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "invalid-payload",
+      reason: "unsafe-vocabulary",
+    });
+  });
+
+  it("holds a reply to exactly the rule every other child-facing string is held to", async () => {
+    // Not a restatement of the case above: this one drives the check from the shared
+    // list itself, so a word added to either half is covered without editing a fixture.
+    for (const word of childForbiddenVocabulary) {
+      const result = await POST(
+        post("sub-1", { ...DRAFT, understood: `Hier steht ${word} im Satz.` }),
+        params("sub-1"),
+      );
+      expect(result.status, `a reply containing "${word}" must be refused`).toBe(400);
+    }
   });
 
   it("fails closed when no admin access code is configured", async () => {

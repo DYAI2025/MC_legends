@@ -158,3 +158,35 @@ export const childUnsafeVocabulary = [
   "Supabase",
   "Sprint",
 ] as const;
+
+/**
+ * Technical language that is not project vocabulary but must not reach a child either:
+ * transport words, status codes and failure-report nouns.
+ *
+ * It used to live only in tests/support/child-safe.ts, on the reasoning that the product
+ * has no reason to know these words. That held while every child-facing string was
+ * authored in this repository and reviewed before it shipped. MCL-74 ended that: an adult
+ * types a reply at nine in the evening and a child hears it read aloud, so the product
+ * now has to know them at the moment the reply is written, not only when a test runs.
+ */
+export const childUnsafeTechnicalVocabulary = [
+  "HTTP",
+  "500",
+  "503",
+  "fetch",
+  "Timeout",
+  "Stack",
+] as const;
+
+/**
+ * The single list every child-facing surface is checked against - the authored datasets
+ * by their tests, and an adult's free-typed reply by `composeReply` at write time.
+ *
+ * One export rather than two call sites composing their own: the moment the two lists can
+ * be combined differently in two places, the weaker combination is the one that decides
+ * what a child hears.
+ */
+export const childForbiddenVocabulary: ReadonlyArray<string> = [
+  ...childUnsafeVocabulary,
+  ...childUnsafeTechnicalVocabulary,
+];
