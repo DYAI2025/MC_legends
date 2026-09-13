@@ -26,6 +26,66 @@ export const designSsotPage: SourceReference = {
   note: "Kanonische Begriffe und Leitplanken",
 };
 
+/**
+ * MCL-71. The bestiary page is the SSoT for what the named creatures are. It is a
+ * separate constant rather than a note on `designSsotPage`, because the two pages
+ * disagree in scope on purpose: 02 holds the open decision axes, this one holds the
+ * creature profiles the decisions are about.
+ */
+export const bestiaryPage: SourceReference = {
+  system: "confluence",
+  ref: "32735234",
+  url: "https://dyai2026.atlassian.net/wiki/spaces/MLOA/pages/32735234/PvE-Entit+ten+Bestiarium+und+Kreaturen+kologie",
+  note: "PvE-Entitäten - Bestiarium und Kreaturenökologie",
+};
+
+/**
+ * MCL-71 / D1. The page that carries the V2 art direction and the approved concept
+ * anchors. An entity whose look is approved here but whose profile is not yet in the
+ * bestiary is TENTATIVE, not STATED - that is the whole reason this reference exists.
+ */
+export const visualAssetSystemPage: SourceReference = {
+  system: "confluence",
+  ref: "22544386",
+  url: "https://dyai2026.atlassian.net/wiki/spaces/MLOA/pages/22544386",
+  note: "14 - Visual Asset System, V2-Art-Direction-Anker",
+};
+
+/**
+ * MCL-71. A picture the project has approved for an element of the world, and the
+ * paper trail that says so.
+ *
+ * `width`/`height` are the real pixel sizes of the file, recorded at export time and
+ * pinned by the unit suite. They are not decoration: `next/image` needs both to
+ * reserve the box before the bytes arrive, and a wrong pair is a layout that jumps
+ * under a child's finger.
+ *
+ * `provenance` points at a sibling record, not at prose in this file, so the licence
+ * and the negative-list check travel with the file rather than with the code that
+ * happens to reference it today.
+ */
+export type ArtworkRef = Readonly<{
+  src: `/assets/creatures/${string}`;
+  /** German, child-facing, and checked by the child-safe policy like any other copy. */
+  alt: string;
+  width: number;
+  height: number;
+  assetId: string;
+  license: "project-owned";
+  /**
+   * The larger cut used on the detail page, with its own real pixel sizes.
+   *
+   * Stored rather than derived from `src` by string surgery: a derived path is a
+   * silent 404 the moment a folder is renamed, and a derived size does not exist at
+   * all - `next/image` would have nothing to reserve the box with.
+   */
+  hero: Readonly<{ src: `/assets/creatures/${string}`; width: number; height: number }>;
+  /** Path to the sibling provenance.json, e.g. "/assets/creatures/veras/provenance.json". */
+  provenance: `/assets/creatures/${string}`;
+  /** ISO date the picture was approved as a V2 anchor. */
+  approvedOn: string;
+}>;
+
 export function jiraSource(key: JiraIssueKey, note: string): SourceReference {
   return {
     system: "jira",

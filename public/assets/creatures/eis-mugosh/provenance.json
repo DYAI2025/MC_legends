@@ -1,0 +1,24 @@
+{
+  "assetId": "creature-eis-mugosh-concept-v2",
+  "source": "MCL-protolab/concepts/art-direction/crops/eis-mugosh-frostberge-cut.png",
+  "sheet": "MCL-protolab/concepts/art-direction/eis-mugosh-frostberge.png",
+  "license": "project-owned",
+  "approvedOn": "2026-08-30",
+  "approvedIn": "MLOA page 14 (22544386), V2 art-direction anchors; bestiary MLOA page 02 (32735234)",
+  "negativeListChecked": {
+    "list": "docs/image-negative-list.md",
+    "by": null,
+    "on": null
+  },
+  "files": {
+    "card": {
+      "width": 640,
+      "height": 619
+    },
+    "hero": {
+      "width": 1280,
+      "height": 1238
+    }
+  },
+  "alt": "Eis-Mugosh, ein Mugosh im Frostgebirge mit eisblau leuchtendem Horn."
+}

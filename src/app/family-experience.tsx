@@ -25,6 +25,7 @@ import {
   ideaAnchorId,
   type CategoryFilter,
 } from "@/content/avaloria-content";
+import { IdeaArtwork } from "@/app/components/idea-artwork";
 import { ideaDetailRoute, overviewRoute } from "@/app/world-routes";
 import {
   childStatusFor,
@@ -381,6 +382,21 @@ export function FamilyExperience({
                   </span>
                   <span className="idea-category">{idea.childCategory}</span>
                 </span>
+                {/*
+                  MCL-71. Only entities with an approved picture get one. A card without
+                  artwork stays exactly as it was - deliberately not filled with an
+                  emblem here, because a picture on every tile would make the seven that
+                  really have approved art indistinguishable from the rest, which is the
+                  one thing this slice exists to show.
+                */}
+                {idea.artwork === undefined ? null : (
+                  <span className="idea-card-visual">
+                    <IdeaArtwork artwork={idea.artwork} variant="card" />
+                    <span className="concept-badge concept-badge-card">
+                      Konzeptbild · noch nicht fest
+                    </span>
+                  </span>
+                )}
                 <h3>{idea.title}</h3>
                 <p>{idea.summary}</p>
                 <span className="idea-owner">Thema: {childTopicLabelFor(idea.internalCategory)}</span>

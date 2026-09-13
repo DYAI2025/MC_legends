@@ -1,6 +1,9 @@
 import {
+  bestiaryPage,
   designSsotPage,
   jiraSource,
+  visualAssetSystemPage,
+  type ArtworkRef,
   type InternalCategory,
   type SourceReference,
   type TruthStatus,
@@ -22,6 +25,12 @@ export type AvaloriaIdea = Readonly<{
   childCategory: ChildCategory;
   internalCategory: InternalCategory;
   source: SourceReference;
+  /**
+   * MCL-71. Optional on purpose and never required: an entity the project has not
+   * approved a picture for keeps the abstract emblem rather than borrowing one, and a
+   * required field would have invited exactly that borrowing.
+   */
+  artwork?: ArtworkRef;
 }>;
 
 /**
@@ -208,6 +217,124 @@ export const avaloriaIdeas: ReadonlyArray<AvaloriaIdea> = [
     childCategory: "Offene Ideen",
     internalCategory: "persistent-world",
     source: jiraSource("MCL-11", "Echtzeitkalender, globale Events und Offline-Fairness"),
+  },
+  /*
+    MCL-71. The seven V2 entities. Every sentence below restates what the bestiary page
+    (32735234) or the design SSoT (20250626) already says; nothing here is authored for
+    the website. Where those pages hedge, so does the entry - Steinwolf is TENTATIVE and
+    the Zhalm name is in CONFLICT on the page itself, and a child reading "Noch offen"
+    is reading the project's actual state rather than a tidier one.
+  */
+  {
+    id: "mugosh",
+    title: "Mugosh",
+    summary:
+      "Ein kräftiges Wesen mit einem leuchtenden Horn. Am Horn sieht man, ob es dich mag.",
+    truthStatus: "STATED",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: bestiaryPage,
+    artwork: {
+      src: "/assets/creatures/mugosh/card.webp",
+      alt: "Mugosh, ein kräftiges Wesen auf vier Beinen mit einem großen leuchtenden Horn an der Stirn.",
+      width: 640,
+      height: 662,
+      hero: { src: "/assets/creatures/mugosh/hero.webp", width: 1280, height: 1324 },
+      assetId: "creature-mugosh-concept-v2",
+      license: "project-owned",
+      provenance: "/assets/creatures/mugosh/provenance.json",
+      approvedOn: "2026-08-30",
+    },
+  },
+  {
+    id: "eis-mugosh",
+    title: "Eis-Mugosh",
+    summary: "Ein Mugosh aus den Frostbergen. Ob es ihn wirklich gibt, ist noch nicht sicher.",
+    truthStatus: "TENTATIVE",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: visualAssetSystemPage,
+    artwork: {
+      src: "/assets/creatures/eis-mugosh/card.webp",
+      alt: "Eis-Mugosh, ein Mugosh im Schnee zwischen Frostbergen, das Horn leuchtet eisblau.",
+      width: 640,
+      height: 619,
+      hero: { src: "/assets/creatures/eis-mugosh/hero.webp", width: 1280, height: 1238 },
+      assetId: "creature-eis-mugosh-concept-v2",
+      license: "project-owned",
+      provenance: "/assets/creatures/eis-mugosh/provenance.json",
+      approvedOn: "2026-08-30",
+    },
+  },
+  {
+    id: "flammenwolf",
+    title: "Flammenwolf",
+    summary: "Ein Wolf, in dem Feuer brennt. Er spuckt Feuer und lässt eine heiße Spur zurück.",
+    truthStatus: "STATED",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: bestiaryPage,
+    artwork: {
+      src: "/assets/creatures/flammenwolf/card.webp",
+      alt: "Der Flammenwolf, ein großer Wolf mit glühendem Fell und Feuer im offenen Maul.",
+      width: 640,
+      height: 491,
+      hero: { src: "/assets/creatures/flammenwolf/hero.webp", width: 1280, height: 982 },
+      assetId: "creature-flammenwolf-concept-v2",
+      license: "project-owned",
+      provenance: "/assets/creatures/flammenwolf/provenance.json",
+      approvedOn: "2026-08-30",
+    },
+  },
+  {
+    id: "veras",
+    title: "Veras",
+    summary:
+      "Ein leuchtendes Waldwesen, das niemanden angreift. Es schützt das Leben im Wald.",
+    truthStatus: "STATED",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: bestiaryPage,
+    artwork: {
+      src: "/assets/creatures/veras/card.webp",
+      alt: "Veras, eine leuchtende weiche Kugel mit einem Schweif, die zwischen Bäumen schwebt.",
+      width: 640,
+      height: 402,
+      hero: { src: "/assets/creatures/veras/hero.webp", width: 1280, height: 805 },
+      assetId: "creature-veras-concept-v2",
+      license: "project-owned",
+      provenance: "/assets/creatures/veras/provenance.json",
+      approvedOn: "2026-08-30",
+    },
+  },
+  {
+    id: "steinwolf",
+    title: "Steinwolf",
+    summary: "Ein Wolf mit einem Körper aus Stein. Wo er herkommt, ist noch nicht festgelegt.",
+    truthStatus: "TENTATIVE",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: bestiaryPage,
+  },
+  {
+    id: "zhalm",
+    title: "Zhalm",
+    summary:
+      "Ein Wurzelwesen, das fast nichts sieht und auf Geräusche hört. Sein Name ist noch nicht entschieden.",
+    truthStatus: "CONFLICT",
+    childCategory: "Wesen & Figuren",
+    internalCategory: "creatures",
+    source: bestiaryPage,
+  },
+  {
+    id: "elementarspeer",
+    title: "Der Elementarspeer",
+    summary:
+      "Eine Startwaffe, die zu Feuer, Wasser, Erde oder Luft gehört. Wie stark sie ist, ist noch offen.",
+    truthStatus: "STATED",
+    childCategory: "Ausrüstung & Bauen",
+    internalCategory: "crafting",
+    source: designSsotPage,
   },
 ];
 

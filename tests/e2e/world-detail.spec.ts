@@ -606,3 +606,91 @@ test.describe("H - accessibility and child-safe language", () => {
     }
   });
 });
+
+/**
+ * MCL-71. What a child actually sees of the seven V2 entities.
+ *
+ * The assertion that matters is `naturalWidth`: a broken path renders an <img> whose
+ * alt text is still perfectly present in the DOM, so a test that only looked for the
+ * element would pass on a page showing a grey box. The browser having decoded pixels is
+ * the only evidence that the file behind the dataset entry is really there and really
+ * an image.
+ */
+test.describe("I - approved concept artwork", () => {
+  const withArtwork = avaloriaIdeas.filter((idea) => idea.artwork !== undefined);
+  const withoutArtwork = avaloriaIdeas.filter((idea) => idea.artwork === undefined);
+
+  test("the dataset really has both kinds, or the rest of this suite proves nothing", () => {
+    expect(withArtwork.length, "entities with approved art").toBeGreaterThan(0);
+    expect(withoutArtwork.length, "entities still on the emblem").toBeGreaterThan(0);
+  });
+
+  for (const idea of avaloriaIdeas.filter((candidate) => candidate.artwork !== undefined)) {
+    test(`${idea.id} shows its approved picture, decoded, with its own description`, async ({
+      page,
+    }) => {
+      await page.goto(`/welt/${idea.id}`);
+      const artwork = idea.artwork;
+      if (artwork === undefined) throw new Error("filtered above");
+
+      const image = page.locator(".detail-visual img").first();
+      await expect(image).toBeVisible();
+      await expect(image).toHaveAttribute("alt", artwork.alt);
+      await expect
+        .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+
+      const src = await image.getAttribute("src");
+      expect(src, `${idea.id} must be served from its own folder`).toContain(
+        `assets%2Fcreatures%2F${idea.id}%2F`,
+      );
+
+      // The picture never retires the sentence that says it is not final.
+      await expect(page.getByText("Konzeptbild · noch nicht fest")).toBeVisible();
+      expectChildSafe(artwork.alt, `${idea.id} alt text`);
+    });
+  }
+
+  test("an entity without approved art keeps the abstract emblem, not a borrowed picture", async ({
+    page,
+  }) => {
+    const idea = withoutArtwork[0];
+    if (idea === undefined) throw new Error("no emblem-only idea in the dataset");
+    await page.goto(`/welt/${idea.id}`);
+
+    await expect(page.locator(".detail-visual svg")).toBeVisible();
+    await expect(page.locator(".detail-visual img")).toHaveCount(0);
+  });
+
+  test("the overview shows the pictures on the cards that have one, and no others", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    for (const idea of withArtwork) {
+      await expect(
+        page.locator(`#${ideaAnchorId(idea.id)} .idea-card-visual img`),
+        `${idea.id} card picture`,
+      ).toHaveCount(1);
+    }
+    for (const idea of withoutArtwork) {
+      await expect(
+        page.locator(`#${ideaAnchorId(idea.id)} .idea-card-visual`),
+        `${idea.id} must stay text-only`,
+      ).toHaveCount(0);
+    }
+  });
+
+  test("the creature filter lists the six creatures and the spear sits under gear", async ({
+    page,
+  }) => {
+    const creatures = ["mugosh", "eis-mugosh", "flammenwolf", "veras", "steinwolf", "zhalm"];
+    await page.goto(`/?thema=${categorySlugFor("Wesen & Figuren")}`);
+    for (const id of creatures) {
+      await expect(page.locator(`#${ideaAnchorId(id)}`), id).toHaveCount(1);
+    }
+    await expect(page.locator(`#${ideaAnchorId("elementarspeer")}`)).toHaveCount(0);
+
+    await page.goto(`/?thema=${categorySlugFor("Ausrüstung & Bauen")}`);
+    await expect(page.locator(`#${ideaAnchorId("elementarspeer")}`)).toHaveCount(1);
+  });
+});

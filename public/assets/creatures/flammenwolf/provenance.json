@@ -1,0 +1,24 @@
+{
+  "assetId": "creature-flammenwolf-concept-v2",
+  "source": "MCL-protolab/concepts/art-direction/crops/flammenwolf-hoellenzorn-cut.png",
+  "sheet": "MCL-protolab/concepts/art-direction/flammenwolf-hoellenzorn.png",
+  "license": "project-owned",
+  "approvedOn": "2026-08-30",
+  "approvedIn": "MLOA page 14 (22544386), V2 art-direction anchors; bestiary MLOA page 02 (32735234)",
+  "negativeListChecked": {
+    "list": "docs/image-negative-list.md",
+    "by": null,
+    "on": null
+  },
+  "files": {
+    "card": {
+      "width": 640,
+      "height": 491
+    },
+    "hero": {
+      "width": 1280,
+      "height": 982
+    }
+  },
+  "alt": "Der Flammenwolf, ein Wolf mit glühendem Fell aus Funken und Glut."
+}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { IdeaArtwork } from "@/app/components/idea-artwork";
 import { IdeaEmblem } from "@/app/components/idea-emblem";
 import {
   categoryFilterFromSlug,
@@ -101,13 +102,23 @@ export default async function WorldDetailPage(props: DetailProps) {
 
         <div className="detail-head">
           <div className="detail-visual">
+            {/*
+              MCL-71. The badge stays on both branches. These are approved *concept*
+              anchors, not finished game art (MLOA:22544386, "Konzeptbild versus
+              Runtime") - a picture that merely looks finished must not be allowed to
+              retire the sentence that says it is not.
+            */}
             <span className="concept-badge">Konzeptbild · noch nicht fest</span>
-            <IdeaEmblem
-              className="detail-emblem"
-              ideaId={idea.id}
-              label={`Blockbild zu ${idea.title}`}
-              status={status.id}
-            />
+            {idea.artwork === undefined ? (
+              <IdeaEmblem
+                className="detail-emblem"
+                ideaId={idea.id}
+                label={`Blockbild zu ${idea.title}`}
+                status={status.id}
+              />
+            ) : (
+              <IdeaArtwork artwork={idea.artwork} className="detail-artwork" variant="hero" />
+            )}
           </div>
           <div className="detail-copy">
             <p className="section-kicker">{idea.childCategory}</p>

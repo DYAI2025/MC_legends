@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { avaloriaIdeas, childCategories } from "@/content/avaloria-content";
 import {
@@ -66,9 +68,27 @@ describe("avaloria content", () => {
     }
   });
 
-  it("only claims STATED for the two documented canon guardrails", () => {
+  /*
+    STATED is the strongest claim this dataset can make: it is the only status that
+    reaches a child as "Schon dabei". The list stays an exact equality rather than a
+    lower bound, so a new one is always a deliberate edit here and never a side effect
+    of authoring an entry. Each id below names the page that marks it STATED.
+
+    MCL-71 added four: the bestiary page (32735234) carries Mugosh, Flammenwolf and
+    Veras under a literal `Status: STATED`, and the design SSoT (20250626) marks the
+    Elementarspeer "STATED als neuer direkter Design-Input". Steinwolf (TENTATIVE there)
+    and Zhalm (name in CONFLICT there) are deliberately NOT on this list.
+  */
+  it("only claims STATED for entries whose source page says STATED", () => {
     const stated = avaloriaIdeas.filter((idea) => idea.truthStatus === "STATED").map((idea) => idea.id);
-    expect(stated.toSorted()).toEqual(["crafting-elemental-swords", "creatures-druhen"]);
+    expect(stated.toSorted()).toEqual([
+      "crafting-elemental-swords",
+      "creatures-druhen",
+      "elementarspeer",
+      "flammenwolf",
+      "mugosh",
+      "veras",
+    ]);
   });
 
   it("keeps prologue and main story separately traceable", () => {
@@ -187,6 +207,99 @@ describe("child-safe vocabulary", () => {
   it("keeps every filter chip label and description free of project jargon", () => {
     for (const category of childCategories) {
       expectChildSafe(`${category.label} ${category.description}`, `category ${category.label}`);
+    }
+  });
+});
+
+/*
+  MCL-71. Pins that the seven V2 entities carry the statements their sources actually
+  make, and that every picture a child sees is a file that exists on disk with a
+  provenance record beside it.
+
+  The disk check is the point of this suite. A typo in `artwork.src` is invisible in a
+  unit test that only reads the dataset - the page would render a broken image and the
+  status badge under it would still claim the creature is "Schon dabei". Reading the
+  file is what makes that failure loud here instead of on a child's screen.
+*/
+describe("MCL-71 artwork", () => {
+  const publicDir = path.join(process.cwd(), "public");
+
+  const expectedEntities = [
+    // truthStatus follows the bestiary page (32735234) and the design SSoT (20250626),
+    // not convenience: Steinwolf is TENTATIVE there and the Zhalm *name* is in CONFLICT.
+    { id: "mugosh", truthStatus: "STATED", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: true },
+    { id: "eis-mugosh", truthStatus: "TENTATIVE", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: true },
+    { id: "flammenwolf", truthStatus: "STATED", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: true },
+    { id: "veras", truthStatus: "STATED", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: true },
+    { id: "steinwolf", truthStatus: "TENTATIVE", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: false },
+    { id: "zhalm", truthStatus: "CONFLICT", childCategory: "Wesen & Figuren", internalCategory: "creatures", hasArtwork: false },
+    { id: "elementarspeer", truthStatus: "STATED", childCategory: "Ausrüstung & Bauen", internalCategory: "crafting", hasArtwork: false },
+  ] as const;
+
+  it("ships the seven V2 entities with the status their source gives them", () => {
+    for (const expected of expectedEntities) {
+      const idea = avaloriaIdeas.find((candidate) => candidate.id === expected.id);
+      expect(idea, `${expected.id} must be in the dataset`).toBeDefined();
+      expect(idea?.truthStatus, `${expected.id} truth status`).toBe(expected.truthStatus);
+      expect(idea?.childCategory, `${expected.id} child category`).toBe(expected.childCategory);
+      expect(idea?.internalCategory, `${expected.id} owner`).toBe(expected.internalCategory);
+    }
+  });
+
+  it("gives artwork only to the entities whose picture is approved", () => {
+    for (const expected of expectedEntities) {
+      const idea = avaloriaIdeas.find((candidate) => candidate.id === expected.id);
+      expect(
+        idea?.artwork !== undefined,
+        `${expected.id} artwork presence`,
+      ).toBe(expected.hasArtwork);
+    }
+  });
+
+  it("describes every picture in words a child can hear, and in the project's own terms", () => {
+    for (const idea of avaloriaIdeas) {
+      if (idea.artwork === undefined) continue;
+      const { artwork } = idea;
+      expect(artwork.src.startsWith("/assets/creatures/"), `${idea.id} src root`).toBe(true);
+      expect(artwork.alt.trim(), `${idea.id} alt`).not.toBe("");
+      expectChildSafe(artwork.alt, `${idea.id} alt text`);
+      expect(artwork.license, `${idea.id} license`).toBe("project-owned");
+      expect(artwork.approvedOn, `${idea.id} approval date`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(artwork.width, `${idea.id} width`).toBeGreaterThan(0);
+      expect(artwork.height, `${idea.id} height`).toBeGreaterThan(0);
+      expect(artwork.assetId.trim(), `${idea.id} asset id`).not.toBe("");
+      expect(artwork.hero.src.startsWith("/assets/creatures/"), `${idea.id} hero src root`).toBe(true);
+      expect(artwork.hero.width, `${idea.id} hero width`).toBeGreaterThan(artwork.width);
+      expect(artwork.hero.height, `${idea.id} hero height`).toBeGreaterThan(0);
+    }
+  });
+
+  it("has the file and its provenance record on disk for every picture it promises", () => {
+    for (const idea of avaloriaIdeas) {
+      if (idea.artwork === undefined) continue;
+      const { artwork } = idea;
+      for (const file of [artwork.src, artwork.hero.src]) {
+        expect(fs.existsSync(path.join(publicDir, file)), `${idea.id}: ${file} must exist`).toBe(true);
+      }
+
+      const provenancePath = path.join(publicDir, artwork.provenance);
+      expect(
+        fs.existsSync(provenancePath),
+        `${idea.id}: ${artwork.provenance} must exist`,
+      ).toBe(true);
+
+      const record = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
+      expect(record.license, `${idea.id} provenance license`).toBe("project-owned");
+      expect(record.assetId, `${idea.id} provenance asset id`).toBe(artwork.assetId);
+      expect(record.approvedOn, `${idea.id} provenance approval`).toBe(artwork.approvedOn);
+      expect(
+        typeof record.source === "string" && record.source.trim() !== "",
+        `${idea.id} provenance must name the source crop`,
+      ).toBe(true);
+      expect(
+        record.negativeListChecked?.list,
+        `${idea.id} provenance must name the negative list it was checked against`,
+      ).toBe("docs/image-negative-list.md");
     }
   });
 });

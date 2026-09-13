@@ -5,6 +5,10 @@ import type { ChildStatus } from "@/content/content-source";
  * gets its own recognisable shape, so a child who comes back to the overview finds the
  * card they opened by its picture and not only by its words.
  *
+ * Since MCL-71 this is the *fallback*, not the only picture: an element the project has
+ * approved concept art for renders `IdeaArtwork` instead (decision D1, Confluence 13B).
+ * The emblem is what everything else keeps, and it stays the right answer for them.
+ *
  * Deliberately abstract. Nothing here depicts a place, a creature or an event, because
  * the dataset has not decided what most of these things look like - a drawn dragon would
  * be new game lore smuggled in as artwork. Blocks in the project's own palette carry no
