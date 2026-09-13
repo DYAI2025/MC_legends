@@ -362,7 +362,7 @@ Secret policing in the same commit: `AVALORIA_REPLY_BLOCKED_NAMES` added to the 
 
 ### Task B10 — Delete script
 
-`scripts/delete-submission.mjs <submissionId> [--apply]` (Postgres via `DATABASE_URL`, `AVALORIA_MEDIA_DIR` for the blob): prints reply count, inbox row (kind, object key), and whether the object key is shared; with `--apply` runs in one transaction: `DELETE FROM submission_reply`, `DELETE FROM submission_inbox`, then unlinks the media object only if no remaining row references it; logs each step. Exit code non-zero when the submission does not exist. `tests/integration/delete-submission.test.ts` proves it against Postgres with a synthetic text submission + reply and an audio submission whose object key is shared by a second row (the file must survive). Documented in `docs/ops/MCL-74-family-reply.md` together with the new env variables and the household-visibility limitation.
+`scripts/delete-submission.mjs <submissionId> [--apply]` (Postgres via `DATABASE_URL`, `AVALORIA_MEDIA_DIR` for the blob): prints reply count, inbox row (kind, object key), and whether the object key is shared; with `--apply` runs the database deletes in one transaction, commits them, then unlinks the media object only if no remaining row references it; logs each step. Exit code non-zero when the submission does not exist. `tests/integration/delete-submission.test.ts` proves it against Postgres with a synthetic text submission + reply and an audio submission whose object key is shared by a second row (the file must survive). Documented in `docs/ops/MCL-74-family-reply.md` together with the new env variables and the household-visibility limitation.
 
 ### Task B11 — E2E `tests/e2e/family-reply.spec.ts`
 
