@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  answerToReplyMessage,
   FAMILY_REPLIER_LABEL,
+  replyAnswerFieldLabel,
+  replyAnswerToggleLabel,
   replyEmptyMessage,
   replyForSpokenIdea,
   replyForWrittenIdea,
@@ -36,6 +39,9 @@ const childFacing: ReadonlyArray<[string, string]> = [
   ["read aloud label", replyReadAloudLabel()],
   ["section heading", replySectionHeading()],
   ["jump label", replyJumpLabel()],
+  ["answer toggle", replyAnswerToggleLabel()],
+  ["answer field label", replyAnswerFieldLabel()],
+  ["answer to reply label", answerToReplyMessage()],
 ];
 
 describe("reply copy for children", () => {
@@ -101,5 +107,17 @@ describe("reply refusals for adults", () => {
     // The check exists so the name stops travelling. An error message is travel.
     expect(replyRefusalSentence("blocked-name")).toMatch(/Name/u);
     expect(replyRefusalSentence("blocked-name").length).toBeLessThan(120);
+  });
+});
+
+describe("MCL-75 reply-context label", () => {
+  it("names whose question the answer belongs to", () => {
+    expect(answerToReplyMessage()).toContain(FAMILY_REPLIER_LABEL);
+  });
+
+  it("never calls the answer orphaned", () => {
+    // The failure this replaces: an answer to a reply falls through to the "belongs to
+    // an earlier question" sentence, because no project question has a reply: id.
+    expect(answerToReplyMessage()).not.toMatch(/früher|vorher|nicht mehr/iu);
   });
 });

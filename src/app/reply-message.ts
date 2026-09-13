@@ -129,3 +129,25 @@ export function replySendFailedSentence(): string {
 export function replyMissingSubmissionSentence(): string {
   return "Zu diesem Beitrag gibt es nichts mehr - er wurde gelöscht.";
 }
+
+/**
+ * What "Meine Ideen" calls an answer a child wrote to a reply question (MCL-75).
+ *
+ * Without it, such an answer falls through to the "belongs to an earlier question"
+ * sentence, because no entry in the question dataset has a `reply:` id - and a child
+ * would be told their answer belongs to a question that no longer exists, minutes after
+ * answering the one thing that was addressed to them personally.
+ */
+export function answerToReplyMessage(): string {
+  return `Deine Antwort auf ${FAMILY_REPLIER_LABEL}s Frage`;
+}
+
+/** The button that opens the way back on a reply card (MCL-75). */
+export function replyAnswerToggleLabel(): string {
+  return "Antworten";
+}
+
+/** The label above the text field on a reply card. */
+export function replyAnswerFieldLabel(): string {
+  return "Deine Antwort";
+}

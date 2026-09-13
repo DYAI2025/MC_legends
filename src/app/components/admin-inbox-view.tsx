@@ -14,6 +14,7 @@ import type { AdminInboxResult } from "@/application/submissions/admin-inbox-cli
 import type { InboxEntry, InboxPage } from "@/application/submissions/submission-inbox-reader";
 import { createBrowserAdminInboxClient, createBrowserAdminReplyClient } from "@/composition/browser";
 import { AdminReplyForm } from "@/app/components/admin-reply-form";
+import { isReplyQuestionId, replyQuestionId } from "@/domain/replies/reply";
 
 const inboxClient = createBrowserAdminInboxClient();
 const replyClient = createBrowserAdminReplyClient();
@@ -282,7 +283,14 @@ export function AdminInboxView() {
           </p>
           <ol className="admin-entries">
             {page.entries.map((entry) => (
-              <AdminInboxCard entry={entry} key={entry.submissionId} />
+              <AdminInboxCard
+                entry={entry}
+                key={entry.submissionId}
+                onShowChain={(questionId) => {
+                  setQuestionDraft(questionId);
+                  applyFilters((current) => ({ ...current, questionId }));
+                }}
+              />
             ))}
           </ol>
         </>
@@ -291,7 +299,24 @@ export function AdminInboxView() {
   );
 }
 
-function AdminInboxCard({ entry }: { entry: InboxEntry }) {
+function AdminInboxCard({
+  entry,
+  onShowChain,
+}: {
+  entry: InboxEntry;
+  onShowChain: (questionId: string) => void;
+}) {
+  /*
+    MCL-75. Whether this card IS an answer to a reply, or could HAVE one.
+
+    Both directions use the existing questionId filter and the index behind it - there is
+    no chain route and no chain query. `reply:<submissionId>` was chosen as one prefix
+    precisely so that following a thread is an equality match on a column the inbox
+    already indexes, rather than a second read model to keep in step with the first.
+  */
+  const answersAReply = isReplyQuestionId(entry.questionId);
+  const ownChainId = replyQuestionId(entry.submissionId);
+
   return (
     <li className="admin-entry">
       {/*
@@ -373,6 +398,26 @@ function AdminInboxCard({ entry }: { entry: InboxEntry }) {
           <dd>{entry.submissionId}</dd>
         </dl>
       </section>
+
+      <div className="admin-chain">
+        {answersAReply ? (
+          <button
+            className="button button-secondary"
+            onClick={() => onShowChain(entry.questionId)}
+            type="button"
+          >
+            Antwort auf Idee {entry.questionId.slice("reply:".length)} - Kette anzeigen
+          </button>
+        ) : (
+          <button
+            className="button button-secondary"
+            onClick={() => onShowChain(ownChainId)}
+            type="button"
+          >
+            Kette anzeigen
+          </button>
+        )}
+      </div>
 
       {/*
         MCL-74. Below the system panel on purpose: an adult reads what a child said, then

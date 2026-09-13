@@ -21,6 +21,7 @@ import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
 import { FamilyReplies } from "@/app/components/family-replies";
+import { answerToReplyMessage } from "@/app/reply-message";
 import {
   allIdeasFilter,
   avaloriaIdeas,
@@ -35,6 +36,7 @@ import {
   childStatusPresentationFor,
   childTopicLabelFor,
 } from "@/content/content-source";
+import { isReplyQuestionId } from "@/domain/replies/reply";
 import { questionById } from "@/content/open-questions";
 import {
   answerBelongsToEarlierQuestionMessage,
@@ -262,12 +264,45 @@ export function FamilyExperience({
   }
 
   /**
+   * MCL-75. A child's answer to a reply question.
+   *
+   * Deliberately the SAME `submitText` + `deliverSubmission` path the focus-question form
+   * uses, with a different questionId. Not a shortcut: it means an answer to Papa gets
+   * the same local-first save, the same receipt requirement and the same child-facing
+   * sentences as every other answer, so "angekommen" cannot come to mean two things.
+   */
+  async function sendReplyAnswer(questionId: string, text: string): Promise<string> {
+    try {
+      const saved = await submitText({ questionId, originalText: text }, repository, {
+        createId: () => crypto.randomUUID(),
+        now: () => new Date(),
+      });
+      return childMessageFor(await deliverSubmission(saved, repository, inbox));
+    } catch {
+      // submitText threw, so nothing was stored - the one case where a child must not be
+      // told their answer is safe.
+      return childFailureMessage("not-saved");
+    } finally {
+      await refreshSubmissions();
+    }
+  }
+
+  /**
    * The question one stored answer was written for.
    *
    * An answer lives in this browser and can outlive the wording it was written for, so
    * the unknown case is a real one and is answered honestly rather than with an id.
    */
   function answerQuestionLabel(questionId: string): string {
+    /*
+      MCL-75. A reply context is checked BEFORE the dataset is consulted, because the
+      dataset can never know about it: `reply:<submissionId>` names one child's own
+      exchange, not a project question. Without this branch such an answer reads as
+      "belongs to an earlier question" - telling a child their answer is orphaned,
+      minutes after answering the one question that was addressed to them personally.
+    */
+    if (isReplyQuestionId(questionId)) return answerToReplyMessage();
+
     const answered = questionById(questionId);
     return answered === null
       ? answerBelongsToEarlierQuestionMessage
@@ -569,7 +604,11 @@ export function FamilyExperience({
         there at all, and its reply has to have somewhere to live.
       */}
       {familySessionActive ? (
-        <FamilyReplies client={replyClient} reader={spokenTextReader} />
+        <FamilyReplies
+          client={replyClient}
+          onAnswer={sendReplyAnswer}
+          reader={spokenTextReader}
+        />
       ) : null}
 
       <footer className="footer content-width">

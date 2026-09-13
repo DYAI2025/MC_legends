@@ -158,3 +158,64 @@ test.describe("Papa antwortet", () => {
     expect(await response.json()).toEqual({ error: "unauthorized" });
   });
 });
+
+/**
+ * MCL-75. The loop closing: a child answers the question that came back.
+ *
+ * This is the sprint goal expressed as a test. Everything before it proves a reply can be
+ * written and read; this proves a child can act on it, and that what they send lands in
+ * the chain an adult can follow - through the questionId filter that already existed,
+ * with no new route behind it.
+ */
+test.describe("Die Antwort des Kindes", () => {
+  test("a child answers the reply, and it lands in the chain", async ({ browser }) => {
+    const childContext = await browser.newContext();
+    const adultContext = await browser.newContext();
+
+    try {
+      const child = await childContext.newPage();
+      await signInAsFamily(child);
+      await submitIdea(child, "Ein Fisch der fliegt");
+
+      const adult = await adultContext.newPage();
+      await signInAsAdmin(adult);
+      await adult.goto("/admin");
+      const card = adult.locator(".admin-reply").first();
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      await card.getByLabel(/Verstanden/u).fill("Du möchtest einen Fisch, der fliegt.");
+      await card.getByLabel(/Eine Frage an dich/u).fill("Wie hoch soll er fliegen?");
+      await card.getByRole("button", { name: "Antwort senden" }).click();
+      await expect(card.getByText("Du möchtest einen Fisch, der fliegt.")).toBeVisible({
+        timeout: 15_000,
+      });
+
+      await child.reload();
+      const section = child.locator("#antworten");
+      await expect(section.getByText("Wie hoch soll er fliegen?")).toBeVisible({ timeout: 15_000 });
+
+      // The way back is revealed, not permanently on screen: three replies should read as
+      // three answers, not as three forms.
+      await section.getByRole("button", { name: "Antworten" }).first().click();
+      const answerField = section.getByLabel("Deine Antwort").first();
+      await expect(answerField).toBeVisible();
+      await answerField.fill("Über die Wolken");
+      await section.getByRole("button", { name: "Antwort speichern" }).first().click();
+
+      // "Meine Ideen" calls it an answer to Papa's question, not an orphan of an earlier
+      // one - the failure MCL-75's label branch exists to prevent.
+      const mine = child.locator("#meine-ideen");
+      await expect(mine.getByText("Über die Wolken")).toBeVisible({ timeout: 15_000 });
+      await expect(mine.getByText(/Deine Antwort auf .*Frage/u).first()).toBeVisible();
+
+      expectChildSafe(await section.innerText(), "the reply section after answering");
+
+      await adult.reload();
+      // The chain is reachable from the adult's own card, through the existing filter.
+      await adult.getByRole("button", { name: /Kette anzeigen/u }).first().click();
+      await expect(adult.getByText("Über die Wolken")).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await childContext.close().catch(() => undefined);
+      await adultContext.close().catch(() => undefined);
+    }
+  });
+});

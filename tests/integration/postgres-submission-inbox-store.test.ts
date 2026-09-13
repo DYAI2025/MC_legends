@@ -18,7 +18,7 @@ import {
   unlockSubmissionInboxTable,
 } from "../support/submission-inbox-table-lock";
 import { asTextRecord } from "../support/text-submission-shape";
-import type { AudioInboxRecord } from "@/application/submissions/submission-inbox-store";
+import type { AudioInboxRecord, TextInboxRecord } from "@/application/submissions/submission-inbox-store";
 
 /**
  * A real PostgreSQL is the whole point of this file. `ON CONFLICT` holding under two
@@ -503,3 +503,70 @@ if (ENABLED) {
     return store;
   });
 }
+
+/**
+ * MCL-75. The chain query, against a real database.
+ *
+ * No chain route and no chain read model exists: following the thread child → adult →
+ * child is an equality match on `question_id`, which migration 0001 already indexes. That
+ * is only true if the index really serves it and the reader really filters by exact id
+ * rather than by prefix - which is what this pins.
+ */
+describe.skipIf(!ENABLED)("MCL-75 reply chain", () => {
+  function chainRecord(
+    submissionId: string,
+    questionId: string,
+    at: string,
+    originalText: string,
+  ): TextInboxRecord {
+    return {
+      kind: "text",
+      submissionId,
+      questionId,
+      createdAt: at,
+      receivedAt: at,
+      receiptId: `receipt-${submissionId}`,
+      originalText,
+    };
+  }
+
+  it("returns only the members of one chain, newest first", async () => {
+    const store = await createStore();
+    const reader = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+
+    await store.appendIfAbsent(
+      chainRecord("origin-1", "companion-animal", "2026-09-12T08:00:00.000Z", "Ein Wolf der leuchtet"),
+    );
+    await store.appendIfAbsent(
+      chainRecord("answer-1", "reply:origin-1", "2026-09-13T08:00:00.000Z", "Blau"),
+    );
+    await store.appendIfAbsent(
+      chainRecord("answer-2", "reply:origin-1", "2026-09-13T09:00:00.000Z", "Doch lieber gruen"),
+    );
+    // A different chain, so an adapter that ignored the filter would be caught.
+    await store.appendIfAbsent(
+      chainRecord("answer-other", "reply:origin-2", "2026-09-13T10:00:00.000Z", "Gehoert woanders hin"),
+    );
+
+    const page = await reader.list({ questionId: "reply:origin-1" });
+    expect(page.entries.map((entry) => entry.submissionId)).toEqual(["answer-2", "answer-1"]);
+    expect(page.total).toBe(2);
+  });
+
+  it("matches the chain id exactly and never by prefix", async () => {
+    // "reply:origin-1" must not collect "reply:origin-10". A prefix match would put one
+    // child's answers into another child's thread.
+    const store = await createStore();
+    const reader = new PostgresSubmissionInboxStore(CONNECTION_STRING);
+
+    await store.appendIfAbsent(
+      chainRecord("a", "reply:origin-1", "2026-09-13T08:00:00.000Z", "eins"),
+    );
+    await store.appendIfAbsent(
+      chainRecord("b", "reply:origin-10", "2026-09-13T09:00:00.000Z", "zehn"),
+    );
+
+    const page = await reader.list({ questionId: "reply:origin-1" });
+    expect(page.entries.map((entry) => entry.submissionId)).toEqual(["a"]);
+  });
+});

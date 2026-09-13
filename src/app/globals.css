@@ -366,3 +366,9 @@ textarea::placeholder { color: #9aa69c; }
 .admin-reply-question { font-size: .88rem; font-weight: 800; line-height: 1.5; margin: 0; }
 .admin-reply-counter { color: var(--muted); font-size: .72rem; margin: 4px 0 12px; text-align: right; }
 .admin-reply-message { color: #8a3b2e; font-size: .85rem; line-height: 1.5; margin: 12px 0 0; }
+
+/* MCL-75. The way back on a reply card, and the chain button in the admin card. */
+.reply-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.reply-answer { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+.reply-answer-message { color: var(--muted); font-size: .88rem; line-height: 1.5; margin: 12px 0 0; }
+.admin-chain { margin-top: 14px; }

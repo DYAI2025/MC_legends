@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import type { FamilyReplyClient } from "@/application/replies/family-reply-client";
 import type { ReplyView } from "@/application/replies/submission-reply-reader";
 import type { SpokenTextReader } from "@/application/media/spoken-text-reader";
+import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import {
   replyEmptyMessage,
   replyForSpokenIdea,
   replyForWrittenIdea,
   replyLoadingMessage,
   replyQuestionLead,
+  replyAnswerFieldLabel,
+  replyAnswerToggleLabel,
   replyReadAloudLabel,
   replySectionHeading,
   replyStatusPill,
@@ -45,9 +48,25 @@ export type FamilyRepliesProps = Readonly<{
   reader: SpokenTextReader;
   /** Overridable so a test does not have to wait a minute to prove the poll runs. */
   pollIntervalMs?: number;
+  /**
+   * MCL-75. Sends a typed answer back under the reply's own questionId.
+   *
+   * A callback rather than this component owning the submission path: the repository,
+   * the inbox port and the child-facing delivery messages already live one level up,
+   * and a second copy of that flow here would be a second place for "angekommen" to
+   * mean something slightly different.
+   */
+  onAnswer?: (questionId: string, text: string) => Promise<string>;
 }>;
 
-export function FamilyReplies({ client, reader, pollIntervalMs }: FamilyRepliesProps) {
+export function FamilyReplies({ client, reader, pollIntervalMs, onAnswer }: FamilyRepliesProps) {
+  // Which card is open, which one is sending, and what it was told. Keyed by reply id so
+  // two cards cannot share a state - opening the second must not close the first or
+  // move the first card's message under it.
+  const [openCard, setOpenCard] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [answerMessages, setAnswerMessages] = useState<Record<string, string>>({});
   const [replies, setReplies] = useState<readonly ReplyView[] | null>(null);
   const interval = pollIntervalMs ?? POLL_INTERVAL_MS;
 
@@ -99,6 +118,27 @@ export function FamilyReplies({ client, reader, pollIntervalMs }: FamilyRepliesP
     };
   }, [interval, reader, refresh]);
 
+  async function sendAnswer(event: FormEvent<HTMLFormElement>, replyId: string, questionId: string) {
+    event.preventDefault();
+    if (onAnswer === undefined || sendingId !== null) return;
+
+    const text = answers[replyId] ?? "";
+    if (text.trim().length === 0) return;
+
+    setSendingId(replyId);
+    // Drop the previous outcome first, so a stale sentence cannot sit under the button
+    // while the new attempt is still running.
+    setAnswerMessages((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([id]) => id !== replyId)),
+    );
+
+    const message = await onAnswer(questionId, text);
+
+    setSendingId(null);
+    setAnswerMessages((previous) => ({ ...previous, [replyId]: message }));
+    setAnswers((previous) => ({ ...previous, [replyId]: "" }));
+  }
+
   return (
     <section className="reply-section content-width" id="antworten" aria-labelledby="replies-heading">
       <h2 id="replies-heading">{replySectionHeading()}</h2>
@@ -137,14 +177,77 @@ export function FamilyReplies({ client, reader, pollIntervalMs }: FamilyRepliesP
               <p className="reply-lead">{replyQuestionLead()}</p>
               <p className="reply-question">{view.reply.question}</p>
 
-              {reader.supported ? (
-                <button
-                  className="button button-secondary"
-                  onClick={() => reader.speak(`${view.reply.understood} ${view.reply.question}`, "de-DE")}
-                  type="button"
-                >
-                  {replyReadAloudLabel()}
-                </button>
+              <div className="reply-actions">
+                {reader.supported ? (
+                  <button
+                    className="button button-secondary"
+                    onClick={() =>
+                      reader.speak(`${view.reply.understood} ${view.reply.question}`, "de-DE")
+                    }
+                    type="button"
+                  >
+                    {replyReadAloudLabel()}
+                  </button>
+                ) : null}
+
+                {onAnswer === undefined ? null : (
+                  <button
+                    aria-expanded={openCard === view.reply.replyId}
+                    className="button"
+                    onClick={() =>
+                      setOpenCard((current) =>
+                        current === view.reply.replyId ? null : view.reply.replyId,
+                      )
+                    }
+                    type="button"
+                  >
+                    {replyAnswerToggleLabel()}
+                  </button>
+                )}
+              </div>
+
+              {/*
+                MCL-75. Both ways back, bound to the reply's own questionId.
+
+                The recorder is the same component the focus question uses, given a
+                different id - which is the whole reason `reply:<submissionId>` is one
+                prefix and not a second format: the write routes already accept it, so
+                answering an adult's question needed no new endpoint and no new shape.
+
+                Revealed rather than always present: a child looking at three replies
+                should see three answers, not three forms.
+              */}
+              {onAnswer !== undefined && openCard === view.reply.replyId ? (
+                <div className="reply-answer">
+                  <form onSubmit={(event) => void sendAnswer(event, view.reply.replyId, view.reply.questionId)}>
+                    <label htmlFor={`antwort-text-${view.reply.replyId}`}>
+                      {replyAnswerFieldLabel()}
+                    </label>
+                    <textarea
+                      id={`antwort-text-${view.reply.replyId}`}
+                      onChange={(event) =>
+                        setAnswers((previous) => ({
+                          ...previous,
+                          [view.reply.replyId]: event.target.value,
+                        }))
+                      }
+                      value={answers[view.reply.replyId] ?? ""}
+                    />
+                    <div className="form-footer">
+                      <button className="button" disabled={sendingId !== null} type="submit">
+                        {sendingId === view.reply.replyId ? "Wird gesendet …" : "Antwort speichern"}
+                      </button>
+                    </div>
+                  </form>
+
+                  <AudioAnswerRecorder questionId={view.reply.questionId} />
+
+                  {answerMessages[view.reply.replyId] === undefined ? null : (
+                    <p className="reply-answer-message" role="status">
+                      {answerMessages[view.reply.replyId]}
+                    </p>
+                  )}
+                </div>
               ) : null}
             </li>
           ))}
