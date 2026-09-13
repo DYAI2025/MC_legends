@@ -507,7 +507,7 @@ Counted from the admin inbox (`GET /api/admin/inbox/submissions` with `questionI
 |---|---|---|
 | Submissions per week (before MCL-71 vs after) | count by `received_at` week | H1/H3: does artwork alone move usage? |
 | Replies per week, median latency submission → reply | `submission_reply.created_at − submission_inbox.received_at` | Ben's reply duty is feasible? |
-| Share of replies with a follow-up recording | rows with `question_id = 'reply:' || submission_id` in `submission_inbox` | Y (loop runs) |
+| Share of replies with a follow-up recording | rows with `question_id` matching the reply's context identifier (`reply:<original-submission-id>`) in `submission_inbox` | Y (loop runs) |
 | Gap reply → next recording (median) | join on `reply:<id>` | D5: is "hours" enough, or is the LLM echo (MCL-76) required? |
 | Read-aloud button usage | none this sprint (no analytics by design) | — |
 
