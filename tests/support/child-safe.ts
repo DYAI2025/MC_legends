@@ -1,18 +1,14 @@
-import { childUnsafeVocabulary } from "@/content/content-source";
+import { childForbiddenVocabulary as sharedForbiddenVocabulary } from "@/content/content-source";
 
 /**
- * Technical language that is not project vocabulary but must not reach a child
- * either: transport words, status codes and failure-report nouns. Kept here rather
- * than in src, because it describes what a test must never find - the product has no
- * reason to know these words at all.
+ * The single list every child-facing surface is checked against.
+ *
+ * Re-exported from src/content rather than assembled here. It used to be assembled here,
+ * with the technical words kept out of the product on purpose - but MCL-74 lets an adult
+ * type a reply a child hears read aloud, so the product has to apply the same list at
+ * write time. Two assemblies would mean the weaker one decides.
  */
-const technicalVocabulary = ["HTTP", "500", "503", "fetch", "Timeout", "Stack"] as const;
-
-/** The single list every child-facing surface is checked against. */
-export const childForbiddenVocabulary: ReadonlyArray<string> = [
-  ...childUnsafeVocabulary,
-  ...technicalVocabulary,
-];
+export const childForbiddenVocabulary: ReadonlyArray<string> = sharedForbiddenVocabulary;
 
 /**
  * Word boundaries, not substrings: German "Papier" contains "api" and would otherwise

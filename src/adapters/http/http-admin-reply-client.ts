@@ -38,9 +38,26 @@ function isReply(value: unknown): value is SubmissionReply {
  * being rendered raw, so a future server can add one without this build printing it at
  * somebody.
  */
+const KNOWN_REFUSALS: ReadonlySet<string> = new Set<ComposeReplyRefusal>([
+  "understood-blank",
+  "understood-too-long",
+  "understood-too-many-sentences",
+  "question-blank",
+  "question-too-long",
+  "question-not-single",
+  "unsafe-vocabulary",
+  "blocked-name",
+]);
+
 function refusalFrom(body: unknown): ComposeReplyRefusal {
   const reason = (body as { reason?: unknown } | null)?.reason;
-  return typeof reason === "string" ? (reason as ComposeReplyRefusal) : "understood-blank";
+  // Checked against the known set, not cast into it. A newer server answering with a
+  // reason this build has never heard of would otherwise reach the message table as a
+  // key it has no entry for, and the form would render an empty status box - a refusal an
+  // adult can neither read nor act on.
+  return typeof reason === "string" && KNOWN_REFUSALS.has(reason)
+    ? (reason as ComposeReplyRefusal)
+    : "unsafe-vocabulary";
 }
 
 /**

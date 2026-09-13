@@ -2,7 +2,7 @@ import { readBoundedJson } from "@/adapters/http/bounded-json-body";
 import { guardAdminRequest } from "@/adapters/http/admin-request-guard";
 import { composeReply } from "@/application/replies/compose-reply";
 import { ReplyTargetError } from "@/application/replies/submission-reply-log";
-import { childUnsafeVocabulary } from "@/content/content-source";
+import { childForbiddenVocabulary } from "@/content/content-source";
 import {
   createAdminAccessGate,
   createAdminRouteRateLimiter,
@@ -77,7 +77,7 @@ export async function POST(
   const composed = composeReply(
     { submissionId, understood: draft.understood, question: draft.question, author: "human" },
     {
-      forbiddenVocabulary: childUnsafeVocabulary,
+      forbiddenVocabulary: childForbiddenVocabulary,
       blockedNames: replyBlockedNames(),
       createId: createReceiptId,
       now: () => new Date(),

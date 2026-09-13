@@ -29,7 +29,19 @@ const secrets = [
   // the secrets somebody remembered to list is a scan that reports "ok" while the
   // newest one is sitting in a bundle.
   ["AVALORIA_ADMIN_ACCESS_CODE", process.env.AVALORIA_ADMIN_ACCESS_CODE],
-  ["AVALORIA_REPLY_BLOCKED_NAMES", process.env.AVALORIA_REPLY_BLOCKED_NAMES],
+  /*
+    MCL-74. Split, because this secret is a LIST.
+
+    Scanning the comma-joined value would only catch a bundle that happened to contain
+    every name in the same order - so a bundle leaking one name out of five would pass the
+    gate. Each name is registered as its own needle instead, which is what the scan can
+    actually find.
+  */
+  ...(process.env.AVALORIA_REPLY_BLOCKED_NAMES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
+    .map((name, index) => [`AVALORIA_REPLY_BLOCKED_NAMES[${index}]`, name]),
 ].filter(([, value]) => typeof value === "string" && value.trim().length > 0);
 
 if (secrets.length === 0) {

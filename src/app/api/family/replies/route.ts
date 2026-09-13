@@ -39,8 +39,12 @@ function refuse(status: 400 | 401 | 429 | 503, error: FamilyReplyError): Respons
  * was about this route. The snapshot test beside this file pins the key set for the same
  * reason.
  *
- * `status` is deliberately absent even though every reply here is `ready`: it is an
- * adult's word for an adult's problem, and a child's page has no use for it.
+ * `status` and `author` are both deliberately absent. `status` is an adult's word for an
+ * adult's problem. `author` is sharper: the reader already excludes `fallback`, but a
+ * `{author: "llm", status: "ready"}` reply is a shape MCL-76 will legitimately write, and
+ * shipping the field would put "a machine wrote this" in the browser of a child whose
+ * card says "Papa hat geantwortet". Whether and how that is ever disclosed is a product
+ * decision for MCL-76, not a field that leaks ahead of it.
  */
 function forChild(view: ReplyView) {
   return {
@@ -50,7 +54,6 @@ function forChild(view: ReplyView) {
       understood: view.reply.understood,
       question: view.reply.question,
       questionId: view.reply.questionId,
-      author: view.reply.author,
       createdAt: view.reply.createdAt,
     },
     submission: {

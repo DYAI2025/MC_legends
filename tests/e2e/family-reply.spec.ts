@@ -58,6 +58,9 @@ test.describe("Papa antwortet", () => {
 
       const card = adult.locator(".admin-reply").first();
       await expect(card).toBeVisible({ timeout: 15_000 });
+      // The panel is collapsed until asked for: an inbox of two hundred cards must not
+      // open two hundred requests for histories nobody has scrolled to.
+      await card.getByRole("button", { name: "Antwort an das Kind" }).click();
       await card.getByLabel(/Verstanden/u).fill(UNDERSTOOD);
       await card.getByLabel(/Eine Frage an dich/u).fill(QUESTION);
       await card.getByRole("button", { name: "Antwort senden" }).click();
@@ -99,6 +102,9 @@ test.describe("Papa antwortet", () => {
 
       const card = adult.locator(".admin-reply").first();
       await expect(card).toBeVisible({ timeout: 15_000 });
+      // The panel is collapsed until asked for: an inbox of two hundred cards must not
+      // open two hundred requests for histories nobody has scrolled to.
+      await card.getByRole("button", { name: "Antwort an das Kind" }).click();
       await card.getByLabel(/Verstanden/u).fill("Du möchtest einen Stein, der singt.");
       await card.getByLabel(/Eine Frage an dich/u).fill("Welche Farbe? Und wie groß?");
       await card.getByRole("button", { name: "Antwort senden" }).click();
@@ -126,6 +132,9 @@ test.describe("Papa antwortet", () => {
       await adult.goto("/admin");
       const card = adult.locator(".admin-reply").first();
       await expect(card).toBeVisible({ timeout: 15_000 });
+      // The panel is collapsed until asked for: an inbox of two hundred cards must not
+      // open two hundred requests for histories nobody has scrolled to.
+      await card.getByRole("button", { name: "Antwort an das Kind" }).click();
       await card.getByLabel(/Verstanden/u).fill("Du möchtest einen Vogel aus Glas.");
       await card.getByLabel(/Eine Frage an dich/u).fill("Wo soll er wohnen?");
       await card.getByRole("button", { name: "Antwort senden" }).click();
