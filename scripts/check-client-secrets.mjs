@@ -29,6 +29,7 @@ const secrets = [
   // the secrets somebody remembered to list is a scan that reports "ok" while the
   // newest one is sitting in a bundle.
   ["AVALORIA_ADMIN_ACCESS_CODE", process.env.AVALORIA_ADMIN_ACCESS_CODE],
+  ["AVALORIA_REPLY_BLOCKED_NAMES", process.env.AVALORIA_REPLY_BLOCKED_NAMES],
 ].filter(([, value]) => typeof value === "string" && value.trim().length > 0);
 
 if (secrets.length === 0) {

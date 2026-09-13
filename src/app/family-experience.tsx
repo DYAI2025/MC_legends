@@ -6,6 +6,8 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { deliverSubmission } from "@/application/submissions/deliver-submission";
 import { submitText } from "@/application/submissions/submit-text";
 import {
+  createBrowserFamilyReplyClient,
+  createBrowserSpokenTextReader,
   createBrowserSubmissionInbox,
   createBrowserSubmissionRepository,
 } from "@/composition/browser";
@@ -18,6 +20,7 @@ import { childFailureMessage, childMessageFor } from "@/app/child-submission-mes
 import { AudioAnswerRecorder } from "@/app/components/audio-answer-recorder";
 import { AvaloriaHeroArt } from "@/app/components/avaloria-hero-art";
 import { FamilyAccessGate } from "@/app/components/family-access-gate";
+import { FamilyReplies } from "@/app/components/family-replies";
 import {
   allIdeasFilter,
   avaloriaIdeas,
@@ -42,6 +45,8 @@ import {
 
 const repository = createBrowserSubmissionRepository();
 const inbox = createBrowserSubmissionInbox();
+const replyClient = createBrowserFamilyReplyClient();
+const spokenTextReader = createBrowserSpokenTextReader();
 
 /**
  * Which question is being asked, as the server decided it (MCL-35).
@@ -553,6 +558,19 @@ export function FamilyExperience({
           </ul>
         )}
       </section>
+
+      {/*
+        MCL-74. Only behind the family session: a browser that has not signed in has no
+        household to read replies for, and mounting this would poll a route that can only
+        answer 401.
+
+        Its own section rather than a column inside "Meine Ideen", because that list holds
+        only text ideas from this browser's own storage - a spoken idea never appears
+        there at all, and its reply has to have somewhere to live.
+      */}
+      {familySessionActive ? (
+        <FamilyReplies client={replyClient} reader={spokenTextReader} />
+      ) : null}
 
       <footer className="footer content-width">
         <span>✦ Avaloria</span>

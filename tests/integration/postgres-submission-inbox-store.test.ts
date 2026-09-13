@@ -51,7 +51,14 @@ function inspect(): Pool {
 }
 
 async function emptyTable(): Promise<void> {
-  await inspect().query("TRUNCATE submission_inbox");
+  /*
+    MCL-74 added submission_reply with a foreign key to this table, and PostgreSQL
+    refuses to TRUNCATE a table another one references. Both tables are named rather than
+    CASCADE: CASCADE would silently follow whatever references this table next, and a
+    future table full of something nobody meant to empty is exactly the kind of surprise
+    a test helper should not be able to spring.
+  */
+  await inspect().query("TRUNCATE submission_reply, submission_inbox");
 }
 
 /** The contract's "empty store per call": one table, emptied before each handout. */

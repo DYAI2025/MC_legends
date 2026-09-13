@@ -343,3 +343,26 @@ textarea::placeholder { color: #9aa69c; }
 .admin-question-history { color: var(--muted); display: grid; font-size: .84rem; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .admin-question-history-title { color: var(--ink); font-weight: 800; }
 .admin-question-history-more { color: var(--muted); font-size: .78rem; margin: 10px 0 0; }
+
+/* MCL-74. The reply section on the child's page and the reply form in the admin card.
+   Nothing here animates: there is no spinner and no transition, so `prefers-reduced-
+   motion` needs no special case. The pill deliberately borrows none of the .status-*
+   colours - a reply is not a claim that Avaloria adopted the idea. */
+.reply-section { border-top: 1px solid var(--line); padding-bottom: 96px; padding-top: 72px; }
+.reply-empty { color: var(--muted); line-height: 1.55; margin: 0; }
+.reply-list { display: grid; gap: 18px; list-style: none; margin: 20px 0 0; padding: 0; }
+.reply-card { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+.reply-pill { background: #eef4ff; border-radius: 999px; color: #2f4a6b; display: inline-block; font-size: .72rem; font-weight: 900; margin: 0 0 14px; padding: 6px 12px; }
+.reply-origin { color: var(--muted); font-size: .8rem; font-weight: 700; margin: 0 0 4px; }
+.reply-origin-text { color: var(--muted); font-size: .85rem; line-height: 1.5; margin: 0 0 16px; }
+.reply-lead { font-size: .78rem; font-weight: 900; letter-spacing: .04em; margin: 0 0 6px; text-transform: uppercase; }
+.reply-understood { font-size: 1rem; line-height: 1.55; margin: 0 0 16px; }
+.reply-question { font-size: 1.1rem; font-weight: 800; line-height: 1.45; margin: 0 0 18px; }
+.admin-reply { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+.admin-reply h4 { font-size: .95rem; margin: 0 0 12px; }
+.admin-reply-history { display: grid; gap: 12px; list-style: none; margin: 0 0 16px; padding: 0; }
+.admin-reply-history li { background: var(--cream); border-radius: 12px; padding: 12px 14px; }
+.admin-reply-understood { font-size: .88rem; line-height: 1.5; margin: 0 0 6px; }
+.admin-reply-question { font-size: .88rem; font-weight: 800; line-height: 1.5; margin: 0; }
+.admin-reply-counter { color: var(--muted); font-size: .72rem; margin: 4px 0 12px; text-align: right; }
+.admin-reply-message { color: #8a3b2e; font-size: .85rem; line-height: 1.5; margin: 12px 0 0; }

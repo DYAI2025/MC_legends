@@ -1,4 +1,7 @@
 import { HttpAdminInboxClient } from "@/adapters/http/http-admin-inbox-client";
+import { HttpAdminReplyClient } from "@/adapters/http/http-admin-reply-client";
+import { HttpFamilyReplyClient } from "@/adapters/http/http-family-reply-client";
+import { BrowserSpeechSynthesisReader } from "@/adapters/media/browser-speech-synthesis-reader";
 import { HttpAudioAnswerInbox } from "@/adapters/http/http-audio-answer-inbox";
 import { HttpFamilySessionClient } from "@/adapters/http/http-family-session-client";
 import { HttpQuestionBoardClient } from "@/adapters/http/http-question-board-client";
@@ -11,6 +14,9 @@ import type { AdminInboxClient } from "@/application/submissions/admin-inbox-cli
 import type { QuestionBoardClient } from "@/application/questions/question-board-client";
 import type { SubmissionInbox } from "@/application/submissions/submission-inbox";
 import type { SubmissionRepository } from "@/application/submissions/submission-repository";
+import type { AdminReplyClient } from "@/application/replies/admin-reply-client";
+import type { FamilyReplyClient } from "@/application/replies/family-reply-client";
+import type { SpokenTextReader } from "@/application/media/spoken-text-reader";
 
 export function createBrowserSubmissionRepository(): SubmissionRepository {
   return new IndexedDbSubmissionRepository();
@@ -90,4 +96,28 @@ export function createBrowserAudioAnswerSender(): AudioAnswerSender {
     createId: () => crypto.randomUUID(),
     now: () => new Date(),
   });
+}
+
+/**
+ * Reading the household's replies from the child's browser (MCL-74). Carries no
+ * credential of its own.
+ */
+export function createBrowserFamilyReplyClient(): FamilyReplyClient {
+  return new HttpFamilyReplyClient();
+}
+
+/** Writing and reading replies from the admin browser. Carries no credential of its own. */
+export function createBrowserAdminReplyClient(): AdminReplyClient {
+  return new HttpAdminReplyClient();
+}
+
+/**
+ * The browser's own voice, behind a port.
+ *
+ * Built here rather than in the component so the surface can be rendered in a test
+ * without a speech engine, and so "this device has no voice" is answered in one place
+ * instead of by every card that offers to read itself aloud.
+ */
+export function createBrowserSpokenTextReader(): SpokenTextReader {
+  return new BrowserSpeechSynthesisReader();
 }

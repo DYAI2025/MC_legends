@@ -102,6 +102,10 @@ describe("architecture boundaries", () => {
         // into the client bundle, and the rule is worth nothing if it only covers the
         // secrets somebody remembered to add.
         /AVALORIA_ADMIN_ACCESS_CODE/,
+        // MCL-74. A list of real people's names, held to the same rule as an access
+        // code: it exists to keep those names out of what a child reads, and shipping
+        // it in the browser bundle would publish exactly what it is for.
+        /AVALORIA_REPLY_BLOCKED_NAMES/,
       ],
       ["src/composition/server.ts"],
     );
@@ -127,6 +131,11 @@ describe("architecture boundaries", () => {
       // MCL-35. The one client component that can CHANGE something for everybody, so a
       // server-root import here would be the worst place in the app to leave uncovered.
       "src/app/components/admin-question-board.tsx",
+      // MCL-74. Added with the components themselves - this list is hardcoded, so a
+      // client component missing from it is silently uncovered rather than loudly
+      // wrong, and these two are the ones that sit closest to a child's page.
+      "src/app/components/family-replies.tsx",
+      "src/app/components/admin-reply-form.tsx",
     ]) {
       await expectNoForbiddenSource(clientComponent, [
         /from ["']@\/composition\/server["']/,

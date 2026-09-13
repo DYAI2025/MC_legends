@@ -12,9 +12,11 @@ import {
 import type { SubmissionKind } from "@/domain/submissions/submission";
 import type { AdminInboxResult } from "@/application/submissions/admin-inbox-client";
 import type { InboxEntry, InboxPage } from "@/application/submissions/submission-inbox-reader";
-import { createBrowserAdminInboxClient } from "@/composition/browser";
+import { createBrowserAdminInboxClient, createBrowserAdminReplyClient } from "@/composition/browser";
+import { AdminReplyForm } from "@/app/components/admin-reply-form";
 
 const inboxClient = createBrowserAdminInboxClient();
+const replyClient = createBrowserAdminReplyClient();
 
 /**
  * The kinds the filter can express, as a total list over the union.
@@ -371,6 +373,13 @@ function AdminInboxCard({ entry }: { entry: InboxEntry }) {
           <dd>{entry.submissionId}</dd>
         </dl>
       </section>
+
+      {/*
+        MCL-74. Below the system panel on purpose: an adult reads what a child said, then
+        what the system knows about it, and only then writes back. The form is per card,
+        so the submission it answers is never in doubt.
+      */}
+      <AdminReplyForm client={replyClient} submissionId={entry.submissionId} />
     </li>
   );
 }

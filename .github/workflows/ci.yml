@@ -102,6 +102,7 @@ jobs:
           AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
           AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
           AVALORIA_ADMIN_ACCESS_CODE: ci-canary-admin-code-7a2d5f14
+          AVALORIA_REPLY_BLOCKED_NAMES: ci-canary-blocked-name-2f8e
 
       - name: Client bundle secret scan
         run: npm run check:client-secrets
@@ -109,6 +110,7 @@ jobs:
           AVALORIA_FAMILY_ACCESS_CODE: ci-canary-family-code-9f3b7d21
           AVALORIA_SESSION_SECRET: ci-canary-session-secret-4c81ea60
           AVALORIA_ADMIN_ACCESS_CODE: ci-canary-admin-code-7a2d5f14
+          AVALORIA_REPLY_BLOCKED_NAMES: ci-canary-blocked-name-2f8e
 
       - name: Require committed next-env types
         shell: bash

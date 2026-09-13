@@ -16,10 +16,15 @@ import type {
   QuestionLifecycleLog,
   QuestionLifecycleReader,
 } from "@/application/questions/question-lifecycle";
+import { FileSubmissionReplyLog } from "@/adapters/persistence/file-submission-reply-log";
+import { PostgresSubmissionReplyLog } from "@/adapters/persistence/postgres-submission-reply-log";
+import type { SubmissionReplyLog } from "@/application/replies/submission-reply-log";
+import type { SubmissionReplyReader } from "@/application/replies/submission-reply-reader";
 
 const DEFAULT_INBOX_DIRECTORY = ".data/inbox";
 const DEFAULT_MEDIA_DIRECTORY = ".data/media";
 const DEFAULT_QUESTION_DIRECTORY = ".data/questions";
+const DEFAULT_REPLY_DIRECTORY = ".data/replies";
 
 /**
  * Server-only composition root. Never import this from browser code - it resolves a
@@ -314,6 +319,73 @@ export function createQuestionLifecycleReader(): QuestionLifecycleReader {
   }
 
   return new FileQuestionLifecycleLog(questionDirectory());
+}
+
+/**
+ * MCL-74. The write side of the reply log - the capability to say something to a child.
+ *
+ * Handed only to the admin route. The file branch takes the inbox READER rather than
+ * opening the inbox files itself, so a reply log never has to assume which store the
+ * inbox is on: with DATABASE_URL set the whole pair is PostgreSQL, without it the whole
+ * pair is on disk, and neither half can be configured into disagreeing with the other.
+ */
+export function createSubmissionReplyLog(): SubmissionReplyLog {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresSubmissionReplyLog(url);
+  }
+
+  return new FileSubmissionReplyLog(replyDirectory(), createSubmissionInboxReader());
+}
+
+/**
+ * The read side, selected the same way.
+ *
+ * A separate factory from the write side even though one class implements both, for the
+ * reason the question lifecycle records - and here it matters more: this is the reader
+ * the CHILD's route asks for. A single factory would put the verb that writes to a child
+ * one mistaken call away from a route behind the family gate.
+ */
+export function createSubmissionReplyReader(): SubmissionReplyReader {
+  const url = databaseUrl();
+
+  if (url !== null) {
+    return new PostgresSubmissionReplyLog(url);
+  }
+
+  return new FileSubmissionReplyLog(replyDirectory(), createSubmissionInboxReader());
+}
+
+/**
+ * Names that must never be written into something a child reads back.
+ *
+ * A secret, and policed as one in all four places, because it is a list of real people's
+ * names. It is configuration rather than code for the same reason an access code is:
+ * putting it in the repository would publish exactly what it exists to keep out of the
+ * product, in a place that is backed up, cloned and searchable forever.
+ *
+ * Blank means no names, and that is a legitimate configuration - it is not a gate that
+ * has to fail closed. Nothing is unsafe about a reply the vocabulary check already
+ * passed; the names list is a second, sharper filter on top of it, not the only one.
+ */
+export function replyBlockedNames(): readonly string[] {
+  return (process.env.AVALORIA_REPLY_BLOCKED_NAMES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+/**
+ * Where the append-only reply JSONL is written when no database is configured.
+ *
+ * Separate from AVALORIA_INBOX_DIR for the reason the other directories are separate: it
+ * holds a different artefact with a different backup question. It matters for restore
+ * order too - the inbox has to come back before the replies that reference it, which
+ * docs/ops/MCL-74-family-reply.md spells out.
+ */
+function replyDirectory(): string {
+  return process.env.AVALORIA_REPLY_DIR?.trim() || DEFAULT_REPLY_DIRECTORY;
 }
 
 /**
